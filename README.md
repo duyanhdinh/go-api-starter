@@ -243,3 +243,69 @@ go test ./...
 Module tạm đặt là `server`; cập nhật trong `go.mod` khi xác định đường
 dẫn repository chính thức. Chưa có dependency bên ngoài nên chưa cần `go.sum`;
 Go sẽ tạo file này khi cần lưu checksum cho dependency được thêm sau này.
+
+## CI trên GitHub Actions
+
+Skeleton lưu workflow mẫu tại `templates/.github/workflows/ci.yml`, nên CI
+chưa tự chạy khi đưa repository lên GitHub. Các file trong `templates/` giữ
+đường dẫn tương ứng với vị trí sử dụng tính từ thư mục gốc dự án.
+
+Để bật CI cho dự án dùng GitHub Actions, copy file mẫu từ thư mục gốc bằng
+PowerShell (nếu đã có workflow cùng tên, kiểm tra và hợp nhất trước):
+
+```powershell
+New-Item -ItemType Directory -Force .github/workflows | Out-Null
+Copy-Item templates/.github/workflows/ci.yml .github/workflows/ci.yml
+```
+
+Commit và push `.github/workflows/ci.yml` để kích hoạt. Khi được kích hoạt,
+workflow chạy trên mọi push và khi mở, mở lại hoặc cập nhật pull request,
+không giới hạn tên nhánh. Nếu dùng nền tảng CI khác, dùng các lệnh kiểm tra
+local bên dưới để xây dựng pipeline tương ứng.
+
+Workflow `Go CI`, job/check `Go checks` chạy trên Ubuntu: kiểm tra `gofmt`
+(chỉ đọc, thất bại nếu cần format), `go vet ./...`, `go test -race ./...` và
+`go build ./...`. Phiên bản Go lấy từ `go.mod`. Job có timeout 15 phút;
+lượt chạy mới hủy lượt cũ cùng PR hoặc cùng ref. Lỗi ở một bước làm job thất
+bại và các bước sau không chạy; không tự sửa hoặc commit code.
+
+Workflow chỉ cấp `contents: read`, không lưu credential sau checkout, không
+dùng secret hay sự kiện `pull_request_target`. Unit test hiện chạy độc lập,
+không cần DB hoặc dịch vụ ngoài. Khi thêm integration test cần dịch vụ,
+tách bằng build tag `integration` và chạy riêng bằng
+`go test -tags=integration ./...` với môi trường phù hợp; không đưa chúng vào
+unit test mặc định.
+
+Chưa có `go.sum` thì cache tắt. Khi thêm dependency, chạy `go mod tidy` ở
+local và commit cả `go.mod` lẫn `go.sum`; cache tự bật theo checksum của
+`go.sum`. CI dùng `GOFLAGS=-mod=readonly` để báo lỗi khi thiếu thông tin
+dependency/checksum, thay vì tự cập nhật module để vượt kiểm tra.
+
+Chạy tương đương từ thư mục gốc bằng Bash (Linux, WSL hoặc Git Bash):
+
+```bash
+set -euo pipefail
+export CGO_ENABLED=1
+export GOFLAGS=-mod=readonly
+unformatted=$(gofmt -l .)
+if [[ -n "$unformatted" ]]; then
+  printf 'Go files need formatting:\n%s\n' "$unformatted"
+  exit 1
+fi
+go vet ./...
+go test -race ./...
+go build ./...
+```
+
+Cần Go theo `go.mod` và C compiler tương thích với Go trên hệ điều hành đang
+dùng để chạy race detector (Ubuntu runner có sẵn GCC). Nếu Windows thiếu
+compiler, dùng môi trường Linux/WSL có Go và GCC; `go test ./...` không thay
+thế được kiểm tra race.
+
+Sau khi có workflow run trên GitHub, quản trị viên chọn check `Go checks`
+trong branch protection/ruleset của nhánh cần bảo vệ. Task này không thay đổi
+settings repository. Kết quả lệnh local không đồng nghĩa workflow đã chạy
+thành công trên GitHub.
+
+Tham khảo cấu hình [setup-go](https://github.com/actions/setup-go) và
+[checkout](https://github.com/actions/checkout).
