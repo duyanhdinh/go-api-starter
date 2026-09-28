@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
+
+	"server/internal/platform/config"
 )
 
 func main() {
@@ -18,9 +20,9 @@ func main() {
 }
 
 func run() error {
-	address := os.Getenv("HTTP_ADDR")
-	if address == "" {
-		address = ":8080"
+	configuration, err := config.Load()
+	if err != nil {
+		return err
 	}
 
 	mux := http.NewServeMux()
@@ -30,21 +32,27 @@ func run() error {
 	})
 
 	server := &http.Server{
-		Addr:              address,
+		Addr:              configuration.HTTPAddr,
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: configuration.ReadHeaderTimeout,
+		ReadTimeout:       configuration.ReadTimeout,
+		WriteTimeout:      configuration.WriteTimeout,
+		IdleTimeout:       configuration.IdleTimeout,
 	}
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("API server listening on %s", address)
-		serverErrors <- server.ListenAndServe()
+		log.Printf("API server listening on %s (env=%s)", listener.Addr(), configuration.Environment)
+		serverErrors <- server.Serve(listener)
 	}()
 
 	select {
@@ -57,7 +65,7 @@ func run() error {
 		stop()
 	}
 
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), configuration.ShutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownContext); err != nil {
 		_ = server.Close()

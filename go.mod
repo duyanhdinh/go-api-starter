@@ -1,3 +1,3 @@
-module med_quiz/server
+module server
 
 go 1.27.0
