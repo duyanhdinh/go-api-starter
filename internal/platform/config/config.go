@@ -23,6 +23,7 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	HTTPClient        HTTPClientConfig
 }
 
 func Load() (Config, error) {
@@ -75,12 +76,34 @@ func load(getenv func(string) string) (Config, error) {
 		{"HTTP_WRITE_TIMEOUT", &configuration.WriteTimeout},
 		{"HTTP_IDLE_TIMEOUT", &configuration.IdleTimeout},
 		{"HTTP_SHUTDOWN_TIMEOUT", &configuration.ShutdownTimeout},
+		{"HTTP_CLIENT_TIMEOUT", &configuration.HTTPClient.Timeout},
+		{"HTTP_CLIENT_CONNECT_TIMEOUT", &configuration.HTTPClient.ConnectTimeout},
+		{"HTTP_CLIENT_TLS_HANDSHAKE_TIMEOUT", &configuration.HTTPClient.TLSHandshakeTimeout},
+		{"HTTP_CLIENT_RESPONSE_HEADER_TIMEOUT", &configuration.HTTPClient.ResponseHeaderTimeout},
+		{"HTTP_CLIENT_IDLE_CONN_TIMEOUT", &configuration.HTTPClient.IdleConnTimeout},
 	} {
 		duration, err := time.ParseDuration(value(setting.name))
 		if err != nil || duration <= 0 {
 			return Config{}, fmt.Errorf("%s must be a positive duration (for example 5s)", setting.name)
 		}
 		*setting.target = duration
+	}
+	for _, setting := range []struct {
+		name   string
+		target *int
+	}{
+		{"HTTP_CLIENT_MAX_IDLE_CONNS", &configuration.HTTPClient.MaxIdleConns},
+		{"HTTP_CLIENT_MAX_IDLE_CONNS_PER_HOST", &configuration.HTTPClient.MaxIdleConnsPerHost},
+		{"HTTP_CLIENT_MAX_CONNS_PER_HOST", &configuration.HTTPClient.MaxConnsPerHost},
+	} {
+		count, err := strconv.Atoi(value(setting.name))
+		if err != nil {
+			return Config{}, fmt.Errorf("%s must be a positive integer", setting.name)
+		}
+		*setting.target = count
+	}
+	if err := configuration.HTTPClient.Validate(); err != nil {
+		return Config{}, err
 	}
 	return configuration, nil
 }

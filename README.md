@@ -115,6 +115,105 @@ HTTP 200 cùng `{"status":"ok"}`. Nếu thất bại, dừng bản mới và kh�
 cùng biến môi trường trước đó. Để bỏ override trong PowerShell, dùng
 `Remove-Item Env:HTTP_ADDR` (tương tự với các biến khác).
 
+## HTTP client outbound
+
+`internal/platform/httpclient.New(configuration.HTTPClient)` trả `*http.Client` với
+transport riêng theo các thiết lập chuẩn của `net/http`, không sửa hoặc dùng chung
+`http.DefaultClient`/`http.DefaultTransport`. Không thêm dependency hay logging.
+Hiện chưa có module gọi outbound nên startup/health không tạo client hoặc gọi mạng mẫu.
+Khi có caller thực tế, khởi tạo một lần ở entrypoint và truyền cùng con trỏ vào
+constructor của module; client và pool có thể dùng đồng thời từ nhiều goroutine.
+Không sửa client/transport sau khi bắt đầu sử dụng.
+
+Các profile dev/test/prod dùng cùng mặc định sau. Env không rỗng ghi đè profile;
+`.env.example` và Compose hỗ trợ tất cả các biến này.
+
+| Biến | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `HTTP_CLIENT_TIMEOUT` | `30s` | Toàn bộ request, gồm kết nối, redirect và đọc body |
+| `HTTP_CLIENT_CONNECT_TIMEOUT` | `5s` | Thiết lập kết nối TCP, gồm phân giải tên |
+| `HTTP_CLIENT_TLS_HANDSHAKE_TIMEOUT` | `5s` | Bắt tay TLS |
+| `HTTP_CLIENT_RESPONSE_HEADER_TIMEOUT` | `10s` | Chờ header sau khi gửi xong request, không gồm đọc body |
+| `HTTP_CLIENT_IDLE_CONN_TIMEOUT` | `90s` | Thời gian giữ kết nối rảnh trong pool |
+| `HTTP_CLIENT_MAX_IDLE_CONNS` | `100` | Tổng số kết nối rảnh tối đa |
+| `HTTP_CLIENT_MAX_IDLE_CONNS_PER_HOST` | `10` | Kết nối rảnh tối đa mỗi host |
+| `HTTP_CLIENT_MAX_CONNS_PER_HOST` | `50` | Kết nối tối đa mỗi host, gồm đang kết nối, hoạt động và rảnh |
+
+Duration và số connection phải dương; giới hạn idle mỗi host không được vượt tổng
+idle hoặc tổng connection mỗi host. Config loader và constructor đều kiểm tra giá
+trị trước khi dùng. Không yêu cầu timeout tổng bằng tổng timeout thành phần: deadline
+context, timeout tổng hoặc timeout của giai đoạn hiện tại, cái nào đến trước sẽ hủy
+request. Chờ slot trong pool và đọc body vẫn chịu timeout tổng/context; idle timeout
+chỉ quản lý tài nguyên giữa các request. TCP keep-alive là `30s`, chờ `100-continue`
+là `1s`, cho phép thương lượng HTTP/2 như transport chuẩn.
+
+TLS giữ xác minh certificate/hostname mặc định, không gắn credential hoặc cookie jar.
+Proxy kế thừa `http.ProxyFromEnvironment` (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`);
+redirect theo mặc định `http.Client`, dừng sau 10 request liên tiếp. Không thêm vòng
+retry/backoff và không retry theo status. Transport chuẩn vẫn có thể tự gửi lại
+request idempotent trong một số lỗi kết nối đã tái sử dụng; đây là hành vi `net/http`.
+HTTP 4xx/5xx được trả nguyên vẹn, caller tự quyết định nghiệp vụ.
+
+Ví dụ vòng đời ở entrypoint (imports `server/internal/platform/config` và
+`server/internal/platform/httpclient`), truyền `outboundClient` vào module cần dùng
+và giữ nó cho đến khi các module đã dừng:
+
+```go
+configuration, err := config.Load()
+if err != nil {
+    return err
+}
+outboundClient, err := httpclient.New(configuration.HTTPClient)
+if err != nil {
+    return err
+}
+defer outboundClient.CloseIdleConnections()
+```
+
+Ví dụ hàm của caller dùng client đã được truyền vào (imports `context`, `fmt`, `io`,
+`net/http`, `time`); `endpoint` phải do ứng dụng kiểm soát hoặc đã kiểm tra đích đến
+tại trust boundary nếu nhận từ người dùng:
+
+```go
+func fetch(ctx context.Context, client *http.Client, endpoint string) ([]byte, error) {
+    requestContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+    request, err := http.NewRequestWithContext(requestContext, http.MethodGet, endpoint, nil)
+    if err != nil {
+        return nil, err
+    }
+    response, err := client.Do(request)
+    if err != nil {
+        return nil, err
+    }
+    defer response.Body.Close()
+    if response.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("unexpected HTTP status: %d", response.StatusCode)
+    }
+    const maxBodyBytes = 1 << 20
+    body, err := io.ReadAll(io.LimitReader(response.Body, maxBodyBytes+1))
+    if err != nil {
+        return nil, err
+    }
+    if len(body) > maxBodyBytes {
+        return nil, fmt.Errorf("response body exceeds limit")
+    }
+    return body, nil
+}
+```
+
+Caller luôn đóng body và chọn giới hạn đọc theo nghiệp vụ. Đọc đến EOF rồi đóng
+giúp tái sử dụng kết nối; đóng sớm khi status/body không phù hợp có thể bỏ kết nối,
+không drain body không giới hạn. `CloseIdleConnections` giải phóng kết nối rảnh,
+không hủy request đang chạy; dừng caller/hủy context trước khi kết thúc vòng đời.
+Không log trực tiếp error của `net/http` vì có thể chứa URL; không ghi token,
+header, query, body hoặc URL có credential.
+
+Kiểm tra local, không gọi Internet: `go test ./internal/platform/config ./internal/platform/httpclient`,
+`go test ./...`, `go vet ./...`, `go build ./...`. Sau triển khai, kiểm tra `/health`
+trả HTTP 200 và `{"status":"ok"}`. Nếu lỗi, khôi phục binary/image và env bản trước;
+có thể bỏ các override `HTTP_CLIENT_*` để trở lại mặc định profile.
+
 ## Error handling
 
 API trả lỗi JSON thống nhất, ví dụ:
