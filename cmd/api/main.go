@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,15 +29,9 @@ func main() {
 }
 
 func run(configuration config.Config, applicationLogger *slog.Logger) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"status":"ok"}`))
-	})
-
 	server := &http.Server{
 		Addr:              configuration.HTTPAddr,
-		Handler:           mux,
+		Handler:           newHandler(applicationLogger),
 		ReadHeaderTimeout: configuration.ReadHeaderTimeout,
 		ReadTimeout:       configuration.ReadTimeout,
 		WriteTimeout:      configuration.WriteTimeout,
@@ -49,7 +44,7 @@ func run(configuration config.Config, applicationLogger *slog.Logger) error {
 
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen for HTTP requests: %w", err)
 	}
 	defer listener.Close()
 
@@ -64,7 +59,7 @@ func run(configuration config.Config, applicationLogger *slog.Logger) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("serve HTTP requests: %w", err)
 	case <-shutdownSignal.Done():
 		stop()
 	}
@@ -72,8 +67,7 @@ func run(configuration config.Config, applicationLogger *slog.Logger) error {
 	shutdownContext, cancel := context.WithTimeout(context.Background(), configuration.ShutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownContext); err != nil {
-		_ = server.Close()
-		return err
+		return fmt.Errorf("shut down HTTP server: %w", errors.Join(err, server.Close()))
 	}
 	return nil
 }

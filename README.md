@@ -115,6 +115,32 @@ HTTP 200 cùng `{"status":"ok"}`. Nếu thất bại, dừng bản mới và kh�
 cùng biến môi trường trước đó. Để bỏ override trong PowerShell, dùng
 `Remove-Item Env:HTTP_ADDR` (tương tự với các biến khác).
 
+## Error handling
+
+API trả lỗi JSON thống nhất, ví dụ:
+
+```json
+{"error":{"code":"not_found","message":"Resource not found"}}
+```
+
+- Route không tồn tại: HTTP 404, code `not_found`.
+- Method không hỗ trợ tại `/health`: HTTP 405, code `method_not_allowed`, header `Allow: GET, HEAD`.
+- Panic trong handler trước khi gửi response: HTTP 500, code `internal_error`.
+- `HEAD` trả status/header tương ứng và không có body.
+
+`cmd/api/handler.go` quản lý response và recovery bằng `net/http`. Panic được ghi qua
+`slog`; không ghi giá trị panic, URL, header hoặc body request để tránh lộ dữ liệu.
+Nếu response đã bắt đầu gửi, recovery hủy request bằng `http.ErrAbortHandler`;
+không nối JSON lỗi vào response dở dang. Panic chủ động bằng `http.ErrAbortHandler`
+được giữ nguyên. Recovery chỉ áp dụng cho goroutine đang xử lý HTTP request.
+Lỗi ghi response được log, không thử ghi lại khi kết nối có thể đã đóng.
+Lỗi listen/serve/shutdown được bọc bằng `%w` để giữ nguyên nguyên nhân cho `errors.Is/As`.
+Các module nghiệp vụ và worker hiện còn trống, chưa có xử lý lỗi nghiệp vụ.
+
+Kiểm tra bằng `go test ./...` và `go vet ./...`. Sau triển khai, kiểm tra `/health`
+trả 200 và `{"status":"ok"}`, route không tồn tại trả JSON 404, `POST /health` trả
+JSON 405. Nếu thất bại, khôi phục binary/image và cấu hình bản trước rồi kiểm tra lại.
+
 ## Logging
 
 `internal/platform/logger` dùng `log/slog`, ghi vào stdout, không ghi file.
