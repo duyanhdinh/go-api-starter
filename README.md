@@ -132,7 +132,7 @@ server/
 
 ## Trách nhiệm các thành phần
 
-- `cmd/api`: điểm khởi chạy API server bằng thư viện chuẩn `net/http`.
+- `cmd/api`: điểm khởi chạy API server; router chi đăng ký các route HTTP trên `net/http`.
 - `cmd/worker`: điểm khởi chạy tác vụ nền trong tương lai.
 - `internal/order`, `internal/product`: giữ tên module mẫu trong `architect.txt`.
 - `handler.go`: tiếp nhận yêu cầu và trả phản hồi.
@@ -162,8 +162,15 @@ go run ./cmd/api
 ```
 
 Kiểm tra bằng `curl http://localhost:8080/health` (đổi cổng nếu đã cấu hình).
-Route không tồn tại trả HTTP 404; phương thức không được hỗ trợ tại `/health`
-trả HTTP 405. `HEAD /health` được `net/http` hỗ trợ cùng route GET.
+Router chính và các route `/health`, `/ready` được đăng ký trong
+`cmd/api/handler.go`. Middleware chạy theo thứ tự CORS → rate limit → recovery →
+router. Route không tồn tại trả HTTP 404; phương thức không được hỗ trợ tại
+`/health` hoặc `/ready` trả HTTP 405. GET và HEAD được đăng ký tường minh.
+Router dùng hành vi mặc định của chi, không thêm middleware chuẩn hóa path:
+`/%68ealth`, `//health` và `/health/` trả JSON 404. Đây là thay đổi có chủ đích
+so với ServeMux: `/%68ealth` trước đây trả 200 và `//health` chuyển hướng về `/health`.
+Rollback router: khôi phục phần đăng ký route cùng dependency chi, rồi chạy lại
+HTTP smoke tests; không có migration dữ liệu hoặc cấu hình cần khôi phục.
 Nhấn Ctrl+C để dừng server; các request đang chạy có tối đa 10 giây để hoàn tất.
 Khi triển khai, kiểm tra `/health` sau khi khởi động; nếu thất bại, dừng bản mới
 và chạy lại binary cùng cấu hình của bản trước.

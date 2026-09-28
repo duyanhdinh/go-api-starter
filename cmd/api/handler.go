@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func newHandler(applicationLogger *slog.Logger, readiness ...func(context.Context) error) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ready", func(writer http.ResponseWriter, request *http.Request) {
+	router := chi.NewRouter()
+	ready := func(writer http.ResponseWriter, request *http.Request) {
 		for _, check := range readiness {
 			if err := check(request.Context()); err != nil {
 				writeResponse(writer, request, applicationLogger, http.StatusServiceUnavailable, `{"status":"unavailable"}`)
@@ -16,22 +18,22 @@ func newHandler(applicationLogger *slog.Logger, readiness ...func(context.Contex
 			}
 		}
 		writeResponse(writer, request, applicationLogger, http.StatusOK, `{"status":"ok"}`)
-	})
-	mux.HandleFunc("/ready", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Allow", "GET, HEAD")
-		writeError(writer, request, applicationLogger, http.StatusMethodNotAllowed)
-	})
-	mux.HandleFunc("GET /health", func(writer http.ResponseWriter, request *http.Request) {
+	}
+	router.Get("/ready", ready)
+	router.Head("/ready", ready)
+	health := func(writer http.ResponseWriter, request *http.Request) {
 		writeResponse(writer, request, applicationLogger, http.StatusOK, `{"status":"ok"}`)
-	})
-	mux.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
+	}
+	router.Get("/health", health)
+	router.Head("/health", health)
+	router.MethodNotAllowed(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Allow", "GET, HEAD")
 		writeError(writer, request, applicationLogger, http.StatusMethodNotAllowed)
 	})
-	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+	router.NotFound(func(writer http.ResponseWriter, request *http.Request) {
 		writeError(writer, request, applicationLogger, http.StatusNotFound)
 	})
-	return recoverPanics(mux, applicationLogger)
+	return recoverPanics(router, applicationLogger)
 }
 
 func writeError(writer http.ResponseWriter, request *http.Request, applicationLogger *slog.Logger, status int) {

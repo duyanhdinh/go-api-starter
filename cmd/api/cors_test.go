@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -200,6 +202,104 @@ func TestCORSPreflightStopsBeforeNext(t *testing.T) {
 				if strings.HasPrefix(name, "Access-Control-") {
 					t.Fatalf("denied preflight grants CORS: %s", name)
 				}
+			}
+		}
+	}
+}
+
+func TestChiRouterMiddlewareHTTPSmoke(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	configuration := testRateLimitConfig()
+	configuration.Burst = 2
+	readinessChecks := 0
+	handler := newHandler(logger, func(context.Context) error {
+		readinessChecks++
+		return errors.New("secret database error")
+	})
+	server := httptest.NewServer(withCORS(withRateLimit(handler, configuration, logger), testCORSConfig()))
+	defer server.Close()
+
+	requestAndCheck := func(method, path, requestedMethod string, wantStatus int, wantBody string, wantAllow bool) {
+		t.Helper()
+		request, err := http.NewRequest(method, server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Origin", "http://localhost:3000")
+		if requestedMethod != "" {
+			request.Header.Set("Access-Control-Request-Method", requestedMethod)
+		}
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != wantStatus || string(body) != wantBody {
+			t.Fatalf("%s %s = %d %q, want %d %q", method, path, response.StatusCode, body, wantStatus, wantBody)
+		}
+		if response.Header.Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+			t.Fatalf("%s %s lost CORS header: %v", method, path, response.Header)
+		}
+		if wantAllow && response.Header.Get("Allow") != "GET, HEAD" {
+			t.Fatalf("%s %s Allow = %q", method, path, response.Header.Get("Allow"))
+		}
+	}
+
+	requestAndCheck(http.MethodOptions, "/health", http.MethodGet, http.StatusNoContent, "", false)
+	requestAndCheck(http.MethodGet, "/health", "", http.StatusOK, `{"status":"ok"}`, false)
+	requestAndCheck(http.MethodHead, "/health", "", http.StatusOK, "", false)
+	requestAndCheck(http.MethodGet, "/ready", "", http.StatusServiceUnavailable, `{"status":"unavailable"}`, false)
+	requestAndCheck(http.MethodHead, "/ready", "", http.StatusServiceUnavailable, "", false)
+	requestAndCheck(http.MethodPost, "/health", "", http.StatusMethodNotAllowed, `{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`, true)
+	requestAndCheck(http.MethodPost, "/missing", "", http.StatusNotFound, `{"error":{"code":"not_found","message":"Resource not found"}}`, false)
+	requestAndCheck(http.MethodPost, "/missing", "", http.StatusTooManyRequests, rateLimitedBody, false)
+	if readinessChecks != 2 {
+		t.Fatalf("readiness checks = %d, want 2", readinessChecks)
+	}
+}
+
+func TestReadinessRecoveryHTTPSmoke(t *testing.T) {
+	for _, panics := range []bool{false, true} {
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		handler := newHandler(logger, func(context.Context) error {
+			if panics {
+				panic("secret database error")
+			}
+			return nil
+		})
+		server := httptest.NewServer(withCORS(withRateLimit(handler, testRateLimitConfig(), logger), testCORSConfig()))
+		t.Cleanup(server.Close)
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			request, err := http.NewRequest(method, server.URL+"/ready", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Origin", "http://localhost:3000")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(response.Body)
+			response.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStatus, wantBody := http.StatusOK, `{"status":"ok"}`
+			if panics {
+				wantStatus, wantBody = http.StatusInternalServerError, `{"error":{"code":"internal_error","message":"Internal server error"}}`
+			}
+			if method == http.MethodHead {
+				wantBody = ""
+			}
+			if response.StatusCode != wantStatus || string(body) != wantBody {
+				t.Fatalf("panic=%v %s /ready = %d %q", panics, method, response.StatusCode, body)
+			}
+			if response.Header.Get("Access-Control-Allow-Origin") != "http://localhost:3000" || response.Header.Get("Content-Type") != "application/json" || response.Header.Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("unexpected headers: %v", response.Header)
 			}
 		}
 	}

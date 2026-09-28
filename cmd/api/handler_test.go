@@ -31,6 +31,9 @@ func TestRoutes(t *testing.T) {
 		{"GET", "/missing", 404, `{"error":{"code":"not_found","message":"Resource not found"}}`, ""},
 		{"POST", "/missing", 404, `{"error":{"code":"not_found","message":"Resource not found"}}`, ""},
 		{"GET", "/health/", 404, `{"error":{"code":"not_found","message":"Resource not found"}}`, ""},
+		{"GET", "//health", 404, `{"error":{"code":"not_found","message":"Resource not found"}}`, ""},
+		{"GET", "/%68ealth", 404, `{"error":{"code":"not_found","message":"Resource not found"}}`, ""},
+		{"HEAD", "/%68ealth", 404, "", ""},
 		{"HEAD", "/missing", 404, "", ""},
 	} {
 		t.Run(testCase.method+testCase.path, func(t *testing.T) {
@@ -39,7 +42,7 @@ func TestRoutes(t *testing.T) {
 			if response.Code != testCase.status || response.Body.String() != testCase.body {
 				t.Fatalf("response = %d %s", response.Code, response.Body.String())
 			}
-			if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("Allow") != testCase.allow {
+			if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Allow") != testCase.allow {
 				t.Fatalf("unexpected headers: %v", response.Header())
 			}
 		})
@@ -62,6 +65,22 @@ func TestReadinessFailure(t *testing.T) {
 		if strings.Contains(response.Body.String()+logs.String(), "secret") {
 			t.Fatal("driver error exposed")
 		}
+	}
+}
+
+func TestReadinessFailureHEAD(t *testing.T) {
+	checks := 0
+	handler := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), func(context.Context) error {
+		checks++
+		return errors.New("secret driver error")
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodHead, "/ready", nil))
+	if checks != 1 || response.Code != http.StatusServiceUnavailable || response.Body.Len() != 0 {
+		t.Fatalf("HEAD readiness = checks %d, status %d, body %q", checks, response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("unexpected HEAD readiness headers: %v", response.Header())
 	}
 }
 
