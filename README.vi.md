@@ -175,6 +175,22 @@ Nhấn Ctrl+C để dừng server; các request đang chạy có tối đa 10 gi
 Khi triển khai, kiểm tra `/health` sau khi khởi động; nếu thất bại, dừng bản mới
 và chạy lại binary cùng cấu hình của bản trước.
 
+## OpenAPI và Swagger UI
+
+Profile `dev` mặc định bật tài liệu tương tác tại `http://localhost:8080/docs` và contract tại `http://localhost:8080/openapi.yaml`. UI chuyển hướng `/docs` sang `/docs/`, dùng asset Swagger UI 5.32.15 đã pin và gửi yêu cầu Try it out cùng origin. Profile `test` và `prod` mặc định tắt docs. Đặt `DOCS_ENABLED=true` hoặc `DOCS_ENABLED=false` để ghi đè profile; giá trị không rỗng khác làm startup thất bại và chỉ rõ `DOCS_ENABLED`. Compose truyền giá trị rỗng để mặc định profile được áp dụng.
+
+`api/openapi.yaml` là contract duy nhất cần duy trì. File mô tả các route health/readiness hiện có và response tương ứng; cập nhật spec và contract test cùng lúc với mọi thay đổi route hoặc response. Dùng validator kin-openapi 0.146.0 đã pin để kiểm tra OpenAPI 3.1.1 và reference nội bộ, sau đó chạy contract tests:
+
+```sh
+go run ./cmd/openapi-validate
+go test ./cmd/api -run 'TestAPIContract|TestContract|TestDocs'
+go test ./internal/platform/config -run 'TestProfiles|TestEnvironmentOverrides|TestInvalidConfiguration'
+```
+
+Workflow GitHub Actions `OpenAPI contract` chạy các bước này khi push và pull request. Response tests gọi chi handler thật và đối chiếu status, headers, JSON body với schema đã nạp; chỉ validate spec không chứng minh implementation khớp contract. Route UI chỉ được đăng ký khi docs bật. Để tắt trên Compose, đặt `DOCS_ENABLED=false` rồi tạo lại container API; xác nhận `/health` và `/ready` vẫn hoạt động, còn URL docs trả 404.
+
+Nguồn asset Swagger UI: package npm `swagger-ui-dist@5.32.15` (Apache-2.0); license và notice của dependency đóng gói được giữ trong `api/swagger-ui/`.
+
 ## Cấu hình dev / test / prod
 
 `internal/platform/config` nạp profile theo `APP_ENV` (`dev`, `test`, `prod`), mặc định
@@ -183,14 +199,15 @@ không phụ thuộc thư mục chạy. Sau khi sửa profile cần build lại 
 Biến môi trường không rỗng ghi đè giá trị trong profile; biến rỗng dùng giá trị
 profile. Không tự động đọc file `.env`. `go test` không tự đặt `APP_ENV=test`.
 
-| Biến | dev / prod | test |
-| --- | --- | --- |
-| `HTTP_ADDR` | `:8080` | `127.0.0.1:0` |
-| `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` |
-| `HTTP_READ_TIMEOUT` | `15s` | `15s` |
-| `HTTP_WRITE_TIMEOUT` | `15s` | `15s` |
-| `HTTP_IDLE_TIMEOUT` | `60s` | `60s` |
-| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` |
+| Biến | dev | test | prod |
+| --- | --- | --- | --- |
+| `HTTP_ADDR` | `:8080` | `127.0.0.1:0` | `:8080` |
+| `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` | `5s` |
+| `HTTP_READ_TIMEOUT` | `15s` | `15s` | `15s` |
+| `HTTP_WRITE_TIMEOUT` | `15s` | `15s` | `15s` |
+| `HTTP_IDLE_TIMEOUT` | `60s` | `60s` | `60s` |
+| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` | `10s` |
+| `DOCS_ENABLED` | `true` | `false` | `false` |
 
 Profile test chỉ lắng nghe loopback và để hệ điều hành chọn cổng trống; log khởi
 động hiển thị cổng thực tế. Dev/prod giữ các mặc định HTTP hiện tại. Chỉ cấu hình

@@ -27,6 +27,7 @@ type Config struct {
 	Database          DatabaseConfig
 	CORS              CORSConfig
 	RateLimit         RateLimitConfig
+	DocsEnabled       bool
 }
 
 func Load() (Config, error) {
@@ -111,6 +112,10 @@ func load(getenv func(string) string) (Config, error) {
 	configuration.CORS, err = loadCORS(value)
 	if err != nil {
 		return Config{}, err
+	}
+	configuration.DocsEnabled, err = strconv.ParseBool(value("DOCS_ENABLED"))
+	if err != nil {
+		return Config{}, fmt.Errorf("DOCS_ENABLED must be a boolean")
 	}
 	configuration.RateLimit, err = loadRateLimit(value)
 	if err != nil {

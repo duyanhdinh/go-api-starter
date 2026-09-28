@@ -82,6 +82,13 @@ func TestRateLimitMiddlewareResponsesAndExemptions(t *testing.T) {
 			if response.Code != http.StatusTooManyRequests {
 				t.Fatal("health subpath was exempt")
 			}
+			request = httptest.NewRequest(method, "/docs/", nil)
+			request.RemoteAddr = "192.0.2.1:1234"
+			response = httptest.NewRecorder()
+			limited.ServeHTTP(response, request)
+			if response.Code != http.StatusTooManyRequests {
+				t.Fatal("docs route was unexpectedly exempt")
+			}
 			request = httptest.NewRequest(http.MethodPost, "/health", nil)
 			request.RemoteAddr = "192.0.2.1:1234"
 			response = httptest.NewRecorder()

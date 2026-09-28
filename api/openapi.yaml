@@ -1,0 +1,223 @@
+openapi: 3.1.1
+info:
+  title: Go API Starter
+  version: 1.0.0
+  description: |
+    This contract documents the implemented health and readiness routes only.
+    Unknown paths return HTTP 404 using the NotFound error envelope defined
+    under components.responses. CORS is disabled by default. When enabled,
+    allowed preflight requests return 204
+    before routing and denied preflight requests return 403; CORS response
+    headers depend on the configured origin policy. Exact GET and HEAD requests
+    to these health routes are exempt from rate limiting. Other routes,
+    including docs, remain subject to configured limits. Docs routes are not
+    API operations.
+servers:
+  - url: /
+    description: Same origin as this API server
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Check whether the API process is alive
+      description: Liveness does not depend on database availability.
+      responses:
+        '200':
+          description: The API process is alive.
+          headers:
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: ok
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    head:
+      operationId: headHealth
+      summary: Check API liveness without a response body
+      description: Returns the GET status and headers with no response body.
+      responses:
+        '200':
+          description: The API process is alive; the response has no body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+        '405':
+          description: The method is unsupported; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            Allow:
+              $ref: '#/components/headers/AllowMethods'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+        '500':
+          description: A handler panicked before committing its response; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+  /ready:
+    get:
+      operationId: getReadiness
+      summary: Check whether the API can serve requests
+      description: Readiness checks configured dependencies, including the database when enabled.
+      responses:
+        '200':
+          description: All configured readiness checks passed.
+          headers:
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: ok
+        '503':
+          description: A configured readiness check failed.
+          headers:
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessUnavailable'
+              example:
+                status: unavailable
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    head:
+      operationId: headReadiness
+      summary: Check readiness without a response body
+      description: Returns the GET status and headers with no response body.
+      responses:
+        '200':
+          description: All configured readiness checks passed; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+        '503':
+          description: A configured readiness check failed; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+        '405':
+          description: The method is unsupported; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            Allow:
+              $ref: '#/components/headers/AllowMethods'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+        '500':
+          description: A handler panicked before committing its response; no response body.
+          headers:
+            Content-Type:
+              $ref: '#/components/headers/JSONContentType'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/ContentTypeOptions'
+components:
+  headers:
+    JSONContentType:
+      description: The response media type.
+      schema:
+        type: string
+        const: application/json
+    AllowMethods:
+      description: Methods supported by this path.
+      schema:
+        type: string
+        const: GET, HEAD
+    ContentTypeOptions:
+      description: Prevents MIME type sniffing.
+      schema:
+        type: string
+        const: nosniff
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+      additionalProperties: false
+    ReadinessUnavailable:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: unavailable
+      additionalProperties: false
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [not_found, method_not_allowed, internal_error]
+            message:
+              type: string
+          additionalProperties: false
+      additionalProperties: false
+  responses:
+    NotFound:
+      description: The request path does not match a registered route.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: not_found
+              message: Resource not found
+    MethodNotAllowed:
+      description: The method is unsupported. The Allow header lists GET and HEAD.
+      headers:
+        Allow:
+          description: Methods supported by this path.
+          $ref: '#/components/headers/AllowMethods'
+        X-Content-Type-Options:
+          $ref: '#/components/headers/ContentTypeOptions'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: method_not_allowed
+              message: Method not allowed
+    InternalServerError:
+      description: A handler panicked before committing its response.
+      headers:
+        X-Content-Type-Options:
+          $ref: '#/components/headers/ContentTypeOptions'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: internal_error
+              message: Internal server error

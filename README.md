@@ -130,18 +130,35 @@ The router uses chi's default behavior and does not add path-normalization middl
 
 Press Ctrl+C to stop the server; in-flight requests have up to 10 seconds to finish. After deployment, check `/health`; if it fails, stop the new release and run the previous binary with its previous configuration.
 
+## OpenAPI and Swagger UI
+
+With the default `dev` profile, open the interactive API documentation at `http://localhost:8080/docs` and the contract at `http://localhost:8080/openapi.yaml`. The UI redirects `/docs` to `/docs/`, loads its pinned local Swagger UI 5.32.15 assets, and sends Try it out requests to the same origin. The `test` and `prod` profiles disable docs by default. Set `DOCS_ENABLED=true` or `DOCS_ENABLED=false` to override the profile; any other non-empty value stops startup and identifies `DOCS_ENABLED`. Compose passes an empty override through so the selected profile default remains effective.
+
+`api/openapi.yaml` is the only maintained contract. It documents implemented health/readiness routes and their response behavior; update the spec and contract test in the same change as any API route or response. Validate the OpenAPI 3.1.1 document and its local references with the pinned kin-openapi 0.146.0 checker, then run the contract tests:
+
+```sh
+go run ./cmd/openapi-validate
+go test ./cmd/api -run 'TestAPIContract|TestContract|TestDocs'
+go test ./internal/platform/config -run 'TestProfiles|TestEnvironmentOverrides|TestInvalidConfiguration'
+```
+
+The `OpenAPI contract` GitHub Actions workflow runs these checks on push and pull requests. The response tests use the real chi handler and validate status, headers, and JSON bodies against the loaded schemas; spec validation by itself does not verify implementation behavior. UI routes are registered only while docs are enabled. To disable them in Compose, set `DOCS_ENABLED=false` and recreate the API container; then confirm `/health` and `/ready` still work and the docs URLs return 404.
+
+Swagger UI asset source: npm package `swagger-ui-dist@5.32.15` (Apache-2.0); its bundled dependency license notices are included alongside the assets in `api/swagger-ui/`.
+
 ## Dev / test / prod configuration
 
 `internal/platform/config` loads a profile based on `APP_ENV` (`dev`, `test`, `prod`), defaulting to `dev`. Files in `internal/platform/config/profiles/*.json` are embedded in the binary and do not depend on the working directory. Rebuild the binary after editing a profile. Non-empty environment variables override profile values; empty variables use profile values. `.env` is not loaded automatically. `go test` does not automatically set `APP_ENV=test`.
 
-| Variable | dev / prod | test |
-| --- | --- | --- |
-| `HTTP_ADDR` | `:8080` | `127.0.0.1:0` |
-| `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` |
-| `HTTP_READ_TIMEOUT` | `15s` | `15s` |
-| `HTTP_WRITE_TIMEOUT` | `15s` | `15s` |
-| `HTTP_IDLE_TIMEOUT` | `60s` | `60s` |
-| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` |
+| Variable | dev | test | prod |
+| --- | --- | --- | --- |
+| `HTTP_ADDR` | `:8080` | `127.0.0.1:0` | `:8080` |
+| `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` | `5s` |
+| `HTTP_READ_TIMEOUT` | `15s` | `15s` | `15s` |
+| `HTTP_WRITE_TIMEOUT` | `15s` | `15s` | `15s` |
+| `HTTP_IDLE_TIMEOUT` | `60s` | `60s` | `60s` |
+| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` | `10s` |
+| `DOCS_ENABLED` | `true` | `false` | `false` |
 
 The test profile listens only on loopback and lets the operating system select an available port; the startup log shows the actual port. Dev/prod retain the current HTTP defaults. Only implemented components are configured; there is no DB or worker configuration yet.
 
