@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.idea
+AGENTS.md
+**/.env
+**/.env.*
+**/*.env
+**/*.pem
+**/*.key
+**/secrets
+**/*_test.go
+**/*.exe
+**/*.log
+tmp
+dist

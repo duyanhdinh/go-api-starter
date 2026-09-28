@@ -29,6 +29,10 @@ server/
 │               ├── test.json
 │               └── prod.json
 ├── pkg/
+├── Dockerfile
+├── compose.yaml
+├── .dockerignore
+├── .env.example
 └── go.mod
 ```
 
@@ -110,6 +114,61 @@ Sau khi triển khai, gọi `GET /health` trên địa chỉ/cổng đã cấu h
 HTTP 200 cùng `{"status":"ok"}`. Nếu thất bại, dừng bản mới và khôi phục binary
 cùng biến môi trường trước đó. Để bỏ override trong PowerShell, dùng
 `Remove-Item Env:HTTP_ADDR` (tương tự với các biến khác).
+
+## Chạy bằng Docker
+
+Yêu cầu Docker với Linux containers và Docker Compose. Dockerfile build Go trong
+một giai đoạn riêng rồi đóng gói binary và CA certificates vào image `scratch`,
+chạy bằng UID/GID `65532:65532`. Image không chứa shell hay file `.env`.
+
+Tạo file cấu hình local từ mẫu (chỉ thực hiện nếu chưa có `.env`):
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+curl.exe --fail http://localhost:8080/health
+docker compose logs api
+docker compose down
+```
+
+Sửa `APP_ENV` trong `.env` thành `dev`, `test` hoặc `prod`. Compose đọc file này
+và truyền các biến đã khai báo trong `environment` vào container; ứng dụng vẫn
+đọc bằng `os.Getenv`. Biến trong terminal ưu tiên hơn giá trị trong file `.env`.
+Các timeout để trống sẽ dùng profile JSON. `HTTP_PORT` chỉ đổi cổng trên máy host;
+Compose cố định `HTTP_ADDR=:8080` bên trong container, kể cả profile test, để
+port mapping hoạt động. Cổng host chỉ bind `127.0.0.1` cho local.
+
+`STOP_GRACE_PERIOD` là thời gian Docker chờ trước khi buộc dừng container; đặt
+lớn hơn `HTTP_SHUTDOWN_TIMEOUT` (mặc định ứng dụng là `10s`). Sau khi đổi env,
+chạy lại `docker compose up -d --no-build` để tạo lại container với cấu hình mới;
+`docker compose restart` không cập nhật env.
+
+Có thể tạo `.env.test` hoặc `.env.prod` từ mẫu, rồi dùng cùng image đã build:
+
+```powershell
+docker compose --env-file .env.test up -d --no-build
+```
+
+Đặt `APP_ENV=test` trong `.env.test`; tên file không tự chọn profile. Các file env
+cá nhân được loại khỏi Git và Docker build context. `.env.example` chỉ chứa giá
+trị mẫu, không chứa secret. Khi thêm secret mới, cần khai báo biến tương ứng
+trong Compose và đọc/kiểm tra ở ứng dụng; không thêm secret vào JSON, Dockerfile
+hay build args. Hiện ứng dụng chưa có thành phần cần secret.
+
+Khi deploy, dùng cùng image và cấp biến môi trường qua nền tảng triển khai.
+Ví dụ chạy trực tiếp image đã build với file env do hệ thống deploy cung cấp:
+
+```sh
+docker run -d --name med-quiz-api --env-file .env.prod -e HTTP_ADDR=:8080 -p 127.0.0.1:8080:8080 --stop-timeout 30 med-quiz-server:local
+```
+
+Compose hiện phục vụ local; cấu hình ingress/cổng public ở nền tảng deploy.
+Smoke test phải trả HTTP 200 và `{"status":"ok"}` từ `/health`. Khi phát hành,
+gắn tag riêng cho từng bản bằng `IMAGE_TAG`, giữ lại image và env bản trước.
+Nếu smoke test thất bại, khôi phục tag/env cũ rồi chạy
+`docker compose up -d --no-build`, sau đó kiểm tra `/health` lại.
+
+Tham khảo [cách Docker Compose truyền biến môi trường](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
 
 ## Kiểm tra cấu hình và build
 

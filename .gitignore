@@ -1,3 +1,7 @@
 .idea
 .agents
 AGENTS.md
+.env
+.env.*
+*.env
+!.env.example
