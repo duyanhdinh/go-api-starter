@@ -28,7 +28,7 @@ server/
 
 ## Trách nhiệm các thành phần
 
-- `cmd/api`: điểm khởi chạy REST API trong tương lai.
+- `cmd/api`: điểm khởi chạy API server bằng thư viện chuẩn `net/http`.
 - `cmd/worker`: điểm khởi chạy tác vụ nền trong tương lai.
 - `internal/order`, `internal/product`: giữ tên module mẫu trong `architect.txt`.
 - `handler.go`: tiếp nhận yêu cầu và trả phản hồi.
@@ -38,9 +38,31 @@ server/
 - `internal/pkg`: cấu hình, kết nối dữ liệu và logging dùng nội bộ.
 - `pkg`: dành cho code dùng chung có thể được dự án khác import.
 
-Các file Go hiện chỉ khai báo package và hàm `main` rỗng. Chưa có HTTP server,
-worker, model nghiệp vụ hoặc kết nối cơ sở dữ liệu. Các thư mục chưa có code
+API server có endpoint kiểm tra hoạt động `GET /health`, trả JSON
+`{"status":"ok"}` với HTTP 200. Worker, model nghiệp vụ và kết nối cơ sở dữ liệu
+chưa được triển khai. Các thư mục chưa có code
 dùng `.gitkeep` để có thể được lưu trong Git.
+
+## Chạy API server
+
+```sh
+go run ./cmd/api
+```
+
+Server mặc định lắng nghe tại `:8080`. Đặt biến môi trường `HTTP_ADDR` để đổi
+địa chỉ, ví dụ trong PowerShell:
+
+```powershell
+$env:HTTP_ADDR = "127.0.0.1:8081"
+go run ./cmd/api
+```
+
+Kiểm tra bằng `curl http://localhost:8080/health` (đổi cổng nếu đã cấu hình).
+Route không tồn tại trả HTTP 404; phương thức không được hỗ trợ tại `/health`
+trả HTTP 405. `HEAD /health` được `net/http` hỗ trợ cùng route GET.
+Nhấn Ctrl+C để dừng server; các request đang chạy có tối đa 10 giây để hoàn tất.
+Khi triển khai, kiểm tra `/health` sau khi khởi động; nếu thất bại, dừng bản mới
+và chạy lại binary cùng cấu hình của bản trước.
 
 ## Kiểm tra
 
