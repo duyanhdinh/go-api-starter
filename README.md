@@ -115,6 +115,41 @@ HTTP 200 cùng `{"status":"ok"}`. Nếu thất bại, dừng bản mới và kh�
 cùng biến môi trường trước đó. Để bỏ override trong PowerShell, dùng
 `Remove-Item Env:HTTP_ADDR` (tương tự với các biến khác).
 
+## Logging
+
+`internal/platform/logger` dùng `log/slog`, ghi vào stdout, không ghi file.
+Profile `dev` và `test` dùng TextHandler với mức DEBUG; `prod` dùng JSONHandler
+với mức INFO. Mỗi bản ghi production nằm trên một dòng JSON để Docker thu thập
+và có thể chuyển tiếp tới Loki; dự án chưa cấu hình Loki.
+
+Đặt `LOG_LEVEL=DEBUG`, `INFO`, `WARN` hoặc `ERROR` để ghi đè mức log.
+Tên mức không phân biệt hoa/thường; hỗ trợ offset của slog như `INFO+2`.
+Giá trị rỗng dùng profile, giá trị không hợp lệ làm API dừng trước khi mở listener.
+Compose truyền `LOG_LEVEL` từ terminal hoặc `.env` vào container.
+
+Khởi tạo logger ở entrypoint và truyền `*slog.Logger` vào module cần dùng:
+
+```go
+applicationLogger := logger.New(configuration.Environment, configuration.LogLevel)
+orderLogger := applicationLogger.With("module", "order")
+orderLogger.Info("Order created", "order_id", orderID)
+```
+
+Import package bằng `server/internal/platform/logger`. `With` tạo logger con,
+giữ fields của logger cha mà không thay đổi logger cha. API dùng fields `service`,
+`env`, `addr`; lỗi nội bộ HTTP cũng được chuyển qua cùng handler ở mức ERROR.
+Lỗi cấu hình dùng logger khởi động ở mức INFO và định dạng theo `APP_ENV`.
+
+Chỉ truyền message và fields đã xác định là an toàn. Không log password, token,
+cookie, authorization header, secret, toàn bộ request/header/config hoặc dữ liệu
+người dùng chưa kiểm soát. Kiểm tra cả nội dung error trước khi log. Logger không
+tự che dữ liệu nhạy cảm trong message, field hay object; module gọi chịu trách
+nhiệm chọn dữ liệu được phép ghi.
+
+Sau triển khai, kiểm tra `/health` trả HTTP 200 và log startup xuất hiện trên stdout
+(JSON khi `APP_ENV=prod`), ví dụ `docker compose logs api`. Nếu lỗi, khôi phục image
+và env trước đó rồi tạo lại container như hướng dẫn rollback bên dưới.
+
 ## Chạy bằng Docker
 
 Yêu cầu Docker với Linux containers và Docker Compose. Dockerfile build Go trong

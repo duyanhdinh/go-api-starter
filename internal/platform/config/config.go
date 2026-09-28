@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -15,6 +16,7 @@ var profiles embed.FS
 
 type Config struct {
 	Environment       string
+	LogLevel          slog.Level
 	HTTPAddr          string
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -53,6 +55,9 @@ func load(getenv func(string) string) (Config, error) {
 		return values[name]
 	}
 	configuration := Config{Environment: environment, HTTPAddr: value("HTTP_ADDR")}
+	if err := configuration.LogLevel.UnmarshalText([]byte(value("LOG_LEVEL"))); err != nil {
+		return Config{}, fmt.Errorf("LOG_LEVEL must be a slog level (DEBUG, INFO, WARN, ERROR, optionally with a numeric offset)")
+	}
 	_, port, err := net.SplitHostPort(configuration.HTTPAddr)
 	if err != nil {
 		return Config{}, fmt.Errorf("HTTP_ADDR must be a host:port address")

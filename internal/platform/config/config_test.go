@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,11 @@ func TestProfiles(t *testing.T) {
 			if environment == "test" {
 				expectedAddress = "127.0.0.1:0"
 			}
-			expected := Config{expectedEnvironment, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second}
+			expectedLevel := slog.LevelDebug
+			if environment == "prod" {
+				expectedLevel = slog.LevelInfo
+			}
+			expected := Config{expectedEnvironment, expectedLevel, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second}
 			if configuration != expected {
 				t.Fatalf("got %+v, want %+v", configuration, expected)
 			}
@@ -37,6 +42,7 @@ func TestProfiles(t *testing.T) {
 func TestEnvironmentOverrides(t *testing.T) {
 	values := map[string]string{
 		"APP_ENV": "prod", "HTTP_ADDR": "[::1]:9000",
+		"LOG_LEVEL":                "WARN",
 		"HTTP_READ_HEADER_TIMEOUT": "1s", "HTTP_READ_TIMEOUT": "2s",
 		"HTTP_WRITE_TIMEOUT": "3s", "HTTP_IDLE_TIMEOUT": "4s",
 		"HTTP_SHUTDOWN_TIMEOUT": "500ms",
@@ -48,7 +54,7 @@ func TestEnvironmentOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := Config{"prod", "[::1]:9000", time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 500 * time.Millisecond}
+	expected := Config{"prod", slog.LevelWarn, "[::1]:9000", time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 500 * time.Millisecond}
 	if configuration != expected {
 		t.Fatalf("got %+v, want %+v", configuration, expected)
 	}
@@ -57,6 +63,7 @@ func TestEnvironmentOverrides(t *testing.T) {
 func TestInvalidConfiguration(t *testing.T) {
 	for _, testCase := range []struct{ name, value string }{
 		{"APP_ENV", "staging"}, {"APP_ENV", "../prod"},
+		{"LOG_LEVEL", "invalid-sensitive-value"},
 		{"HTTP_ADDR", "localhost"}, {"HTTP_ADDR", ":65536"},
 		{"HTTP_ADDR", ":-1"}, {"HTTP_ADDR", ":http"},
 		{"HTTP_READ_HEADER_TIMEOUT", "bad"}, {"HTTP_READ_TIMEOUT", "0s"},

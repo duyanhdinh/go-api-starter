@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -11,20 +11,23 @@ import (
 	"syscall"
 
 	"server/internal/platform/config"
+	"server/internal/platform/logger"
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	configuration, err := config.Load()
+	if err != nil {
+		logger.New(os.Getenv("APP_ENV"), slog.LevelInfo).Error("Invalid configuration", "error", err)
+		os.Exit(1)
+	}
+	applicationLogger := logger.New(configuration.Environment, configuration.LogLevel).With("service", "api", "env", configuration.Environment)
+	if err := run(configuration, applicationLogger); err != nil {
+		applicationLogger.Error("API server failed", "error", err)
+		os.Exit(1)
 	}
 }
 
-func run() error {
-	configuration, err := config.Load()
-	if err != nil {
-		return err
-	}
-
+func run(configuration config.Config, applicationLogger *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -38,6 +41,7 @@ func run() error {
 		ReadTimeout:       configuration.ReadTimeout,
 		WriteTimeout:      configuration.WriteTimeout,
 		IdleTimeout:       configuration.IdleTimeout,
+		ErrorLog:          slog.NewLogLogger(applicationLogger.Handler(), slog.LevelError),
 	}
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -51,7 +55,7 @@ func run() error {
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("API server listening on %s (env=%s)", listener.Addr(), configuration.Environment)
+		applicationLogger.Info("API server listening", "addr", listener.Addr().String())
 		serverErrors <- server.Serve(listener)
 	}()
 
