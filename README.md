@@ -49,8 +49,8 @@ server/
 - `pkg`: dành cho code dùng chung có thể được dự án khác import.
 
 API server có endpoint kiểm tra hoạt động `GET /health`, trả JSON
-`{"status":"ok"}` với HTTP 200. Worker, model nghiệp vụ và kết nối cơ sở dữ liệu
-chưa được triển khai. Các thư mục chưa có code
+`{"status":"ok"}` với HTTP 200. Worker và model nghiệp vụ
+chưa được triển khai. PostgreSQL là dependency tùy chọn. Các thư mục chưa có code
 dùng `.gitkeep` để có thể được lưu trong Git.
 
 ## Chạy API server
@@ -340,10 +340,11 @@ go test ./...
 ```
 
 Module tạm đặt là `server`; cập nhật trong `go.mod` khi xác định đường
-dẫn repository chính thức. Chưa có dependency bên ngoài nên chưa cần `go.sum`;
-Go sẽ tạo file này khi cần lưu checksum cho dependency được thêm sau này.
+dẫn repository chính thức. Dependency được khóa trong `go.mod` và `go.sum`.
 
 ## CI trên GitHub Actions
+
+Xem phần PostgreSQL cuối tài liệu để chạy integration test riêng.
 
 Skeleton lưu workflow mẫu tại `templates/.github/workflows/ci.yml`, nên CI
 chưa tự chạy khi đưa repository lên GitHub. Các file trong `templates/` giữ
@@ -408,3 +409,134 @@ thành công trên GitHub.
 
 Tham khảo cấu hình [setup-go](https://github.com/actions/setup-go) và
 [checkout](https://github.com/actions/checkout).
+
+## PostgreSQL và migration
+
+DB mặc định tắt (`DB_ENABLED=false`), không cần credential và không mở kết nối.
+Khi bật, API mở một pool, ping trước khi listen và đóng pool sau HTTP shutdown;
+cấu hình hoặc kết nối lỗi làm startup thất bại. API không tự chạy migration.
+`GET /health` vẫn là liveness. `GET /ready` trả `200 {"status":"ok"}` khi DB tắt
+hoặc ping thành công; trả `503 {"status":"unavailable"}` khi ping thất bại.
+HEAD không có body; phương thức khác trả 405. Driver error không xuất hiện trong
+log startup, CLI migration hoặc response readiness.
+
+| Biến môi trường | Mặc định | Ràng buộc khi DB bật |
+| --- | --- | --- |
+| `DB_ENABLED` | `false` | boolean |
+| `DB_PROVIDER` | `postgres` | chỉ hỗ trợ postgres |
+| `DATABASE_URL` | trống | URL postgres/postgresql có host, user, tên database |
+| `DB_MAX_OPEN_CONNS` | `10` | > 0 |
+| `DB_MAX_IDLE_CONNS` | `2` | 0 đến max open |
+| `DB_CONN_MAX_LIFETIME` | `30m` | > 0 |
+| `DB_CONN_MAX_IDLE_TIME` | `5m` | > 0 và không vượt lifetime |
+| `DB_CONNECT_TIMEOUT` | `5s` | > 0; timeout driver kết nối |
+| `DB_PING_TIMEOUT` | `2s` | > 0; giới hạn toàn bộ ping, kể cả chờ pool |
+
+Credential chỉ lấy từ môi trường. Không ghi URL thật vào source, profile,
+command-line argument hoặc log; không dump toàn bộ config. `.env` dành cho local
+không được commit; Compose đọc file này, còn `go run` đọc môi trường process.
+Nếu URL không có `sslmode`, module đặt `verify-full`. Production dùng
+`sslmode=verify-full&sslrootcert=/path/to/ca.crt`, hostname khớp certificate và
+mount CA vào container nếu cần. `sslmode=disable` chỉ dùng local cô lập; không
+dùng cho production. URL-encode username/password chứa ký tự đặc biệt.
+
+Module dùng `database/sql`, [pgx](https://github.com/jackc/pgx) v5.11.0 và
+[golang-migrate](https://github.com/golang-migrate/migrate) v4.20.1, khóa trong
+`go.mod`/`go.sum`, tương thích toolchain Go 1.27 của repo. Chọn adapter pgx của
+migrate để dùng chung driver. Đổi provider có thể cần driver, SQL/schema và
+migration mới; đổi `DB_PROVIDER` không chuyển dữ liệu hay dialect.
+
+### Local với Compose
+
+Copy `.env.example` thành `.env`, tự cung cấp `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB`. Không để trống password. Các biến này dùng
+để khởi tạo volume mới; đổi env không đổi credential trong volume đã có.
+
+```sh
+docker compose --profile database up -d --wait postgres
+```
+
+Đặt `DB_ENABLED=true` và `DATABASE_URL` trong `.env` theo mẫu
+`postgres://<user>:<password>@postgres:5432/<database>?sslmode=disable`.
+Để chạy API trên host, đặt các biến tương ứng vào môi trường process và dùng
+host `127.0.0.1`, cổng `POSTGRES_PORT` (mặc định 5432).
+
+```sh
+docker compose up -d --build api
+curl http://localhost:8080/health
+curl http://localhost:8080/ready
+```
+
+Service postgres chỉ chạy khi bật profile hoặc gọi đích danh; API không có
+`depends_on` bắt buộc. Volume `postgres_data` giữ dữ liệu. Không dùng
+`docker compose down -v` trên dữ liệu cần giữ. Để quay về chạy không DB, đặt
+`DB_ENABLED=false` và tạo lại service API; dữ liệu PostgreSQL vẫn giữ nguyên.
+
+### Lệnh migration riêng
+
+Chạy từ root repo. `create` không cần DB. Các lệnh DB dùng cùng env với API,
+bắt buộc `DB_ENABLED=true`. Mặc định đọc `migrations/postgres`; có thể đặt
+`MIGRATIONS_DIR` để thay đường dẫn. Chưa có migration nghiệp vụ.
+
+```sh
+go run ./cmd/migrate create add_example
+go run ./cmd/migrate status
+go run ./cmd/migrate up
+go run ./cmd/migrate down 1
+```
+
+`create` tạo cặp timestamp `.up.sql`/`.down.sql` rỗng; điền và review cả hai
+trước khi chạy. Mỗi version phải duy nhất; không sửa migration đã áp dụng.
+`down` bắt buộc số bước dương, không có rollback toàn bộ ngầm định. Trong
+container đã build, ví dụ: `docker compose run --rm --entrypoint /migrate api status`.
+Migration SQL được COPY vào image; rebuild sau khi thêm SQL. Chỉ chạy `up`
+bằng bước deploy có kiểm soát trước khi chuyển traffic, rồi kiểm tra `/ready`.
+
+Migrate lưu version/dirty trong `schema_migrations`, khóa bằng PostgreSQL
+advisory lock để các runner cùng DB/schema không chạy đồng thời. Sau khởi tạo,
+runner có lock timeout 10s, migration statement timeout 1 phút; bước khởi tạo
+metadata có thể chờ runner khác nhả lock. `status` có thể khởi tạo bảng metadata nếu chưa
+có. Bao SQL nhiều bước trong `BEGIN`/`COMMIT` khi phù hợp; không giả định mọi
+DDL đều transactional. Xem [hướng dẫn lỗi dirty](https://github.com/golang-migrate/migrate/blob/master/GETTING_STARTED.md).
+
+Nếu migration lỗi, dừng runner, xem `status` và đối chiếu schema thực tế với SQL;
+driver details bị ẩn để tránh lộ secret, cần xem diagnostics trên DB bằng quyền
+vận hành phù hợp. Khôi phục backup hoặc sửa schema có kiểm soát. Chỉ sau khi xác
+nhận schema khớp version mới chạy `go run ./cmd/migrate force VERSION` (dùng `-1`
+cho chưa có migration). `force` chỉ đổi metadata, không chạy SQL và không sửa
+dữ liệu. Không tự force, retry hoặc rollback khi chưa biết trạng thái dữ liệu.
+
+### Backup, khôi phục và rollback
+
+Trước migration phá hủy dữ liệu: dừng ghi hoặc lên kế hoạch nhất quán, tạo
+backup bằng `pg_dump --format=custom --file=backup.dump` với credential từ
+`PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, `PGPASSFILE` được cấp an toàn; bảo vệ
+backup như dữ liệu nhạy cảm. Thử `pg_restore --dbname=<database-khoi-phuc-rieng> backup.dump`
+và kiểm tra dữ liệu trước khi cho phép migration. Không thử restore
+đè lên DB hiện có. Với production, ưu tiên snapshot/PITR đã kiểm chứng và migration
+expand/contract để binary cũ và mới cùng hoạt động trong thời gian chuyển tiếp.
+
+Nếu deploy lỗi, rollback image chỉ khi schema còn tương thích. Rollback binary
+không tự hoàn tác schema; `down` có thể mất dữ liệu và không thay backup. Khi cần
+restore, dừng ghi, restore sang DB mới, xác minh schema/dữ liệu, chuyển connection
+secret có kiểm soát và smoke `/health`, `/ready` trước khi mở traffic. Task này
+không deploy hay chạy migration trên DB thật.
+
+### Integration test tách biệt
+
+Unit test: `go test ./...`; kiểm tra tĩnh/build: `go vet ./...`, `go build ./...`.
+Integration yêu cầu opt-in bằng build tag và `TEST_DATABASE_URL` trỏ tới PostgreSQL
+riêng, có quyền tạo schema. Test chỉ tạo/xóa schema tên ngẫu nhiên do chính test
+tạo, dùng migration thử, không rollback schema ứng dụng. Không trỏ biến này tới
+DB production hoặc DB local chứa dữ liệu cần giữ.
+
+```powershell
+$env:TEST_DATABASE_URL = 'postgres://<user>:<password>@127.0.0.1:<test-port>/<test-db>?sslmode=disable'
+go test -tags=integration ./... -count=1
+```
+
+Test kiểm chứng query, migration up/status/down, HTTP health/readiness qua socket,
+readiness 503 khi pool không thể đáp ứng, timeout và phục hồi. Unit test còn dùng
+TCP listener không phản hồi để kiểm tra startup thất bại có giới hạn thời gian.
+Nếu không đặt `TEST_DATABASE_URL`, integration test báo skip; đây không phải bằng
+chứng PostgreSQL đã được kiểm chứng.

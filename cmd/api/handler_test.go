@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -21,6 +22,9 @@ func TestRoutes(t *testing.T) {
 		allow  string
 	}{
 		{"GET", "/health", 200, `{"status":"ok"}`, ""},
+		{"GET", "/ready", 200, `{"status":"ok"}`, ""},
+		{"HEAD", "/ready", 200, "", ""},
+		{"POST", "/ready", 405, `{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`, "GET, HEAD"},
 		{"HEAD", "/health", 200, "", ""},
 		{"POST", "/health", 405, `{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`, "GET, HEAD"},
 		{"OPTIONS", "/health", 405, `{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`, "GET, HEAD"},
@@ -39,6 +43,25 @@ func TestRoutes(t *testing.T) {
 				t.Fatalf("unexpected headers: %v", response.Header())
 			}
 		})
+	}
+}
+
+func TestReadinessFailure(t *testing.T) {
+	var logs bytes.Buffer
+	checks := 0
+	handler := newHandler(slog.New(slog.NewTextHandler(&logs, nil)), func(context.Context) error { checks++; return errors.New("secret driver error") })
+	for _, path := range []string{"/health", "/ready"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		if path == "/health" && (checks != 0 || response.Code != 200 || response.Body.String() != `{"status":"ok"}`) {
+			t.Fatal("liveness depends on database")
+		}
+		if path == "/ready" && (checks != 1 || response.Code != 503 || response.Body.String() != `{"status":"unavailable"}`) {
+			t.Fatal("readiness contract changed")
+		}
+		if strings.Contains(response.Body.String()+logs.String(), "secret") {
+			t.Fatal("driver error exposed")
+		}
 	}
 }
 

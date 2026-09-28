@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"server/internal/platform/config"
+	"server/internal/platform/database"
 	"server/internal/platform/logger"
 )
 
@@ -29,9 +30,18 @@ func main() {
 }
 
 func run(configuration config.Config, applicationLogger *slog.Logger) error {
+	pool, err := database.Open(context.Background(), configuration.Database)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := pool.Close(); err != nil {
+			applicationLogger.Error("Database shutdown failed", "error", err)
+		}
+	}()
 	server := &http.Server{
 		Addr:              configuration.HTTPAddr,
-		Handler:           newHandler(applicationLogger),
+		Handler:           newHandler(applicationLogger, pool.Ping),
 		ReadHeaderTimeout: configuration.ReadHeaderTimeout,
 		ReadTimeout:       configuration.ReadTimeout,
 		WriteTimeout:      configuration.WriteTimeout,

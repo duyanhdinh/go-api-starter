@@ -5,6 +5,15 @@ services:
       context: .
     environment:
       APP_ENV: ${APP_ENV:-dev}
+      DB_ENABLED: ${DB_ENABLED:-false}
+      DB_PROVIDER: ${DB_PROVIDER:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-}
+      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-}
+      DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-}
+      DB_PING_TIMEOUT: ${DB_PING_TIMEOUT:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
       HTTP_ADDR: ":8080"
       HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-}
@@ -23,3 +32,22 @@ services:
     ports:
       - "127.0.0.1:${HTTP_PORT:-8080}:8080"
     stop_grace_period: ${STOP_GRACE_PERIOD:-30s}
+  postgres:
+    image: postgres:17
+    profiles: [database]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

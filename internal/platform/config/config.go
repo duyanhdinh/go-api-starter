@@ -24,6 +24,7 @@ type Config struct {
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
 	HTTPClient        HTTPClientConfig
+	Database          DatabaseConfig
 }
 
 func Load() (Config, error) {
@@ -103,6 +104,10 @@ func load(getenv func(string) string) (Config, error) {
 		*setting.target = count
 	}
 	if err := configuration.HTTPClient.Validate(); err != nil {
+		return Config{}, err
+	}
+	configuration.Database, err = LoadDatabase(getenv)
+	if err != nil {
 		return Config{}, err
 	}
 	return configuration, nil

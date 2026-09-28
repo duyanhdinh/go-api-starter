@@ -31,7 +31,8 @@ func TestProfiles(t *testing.T) {
 			if environment == "prod" {
 				expectedLevel = slog.LevelInfo
 			}
-			expected := Config{expectedEnvironment, expectedLevel, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second, defaultHTTPClientConfig()}
+			databaseDefaults, _ := LoadDatabase(func(string) string { return "" })
+			expected := Config{expectedEnvironment, expectedLevel, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second, defaultHTTPClientConfig(), databaseDefaults}
 			if configuration != expected {
 				t.Fatalf("got %+v, want %+v", configuration, expected)
 			}
@@ -62,7 +63,7 @@ func TestEnvironmentOverrides(t *testing.T) {
 		Timeout: 12 * time.Second, ConnectTimeout: 750 * time.Millisecond,
 		TLSHandshakeTimeout: 2 * time.Second, ResponseHeaderTimeout: 3 * time.Second,
 		IdleConnTimeout: 45 * time.Second, MaxIdleConns: 20, MaxIdleConnsPerHost: 4, MaxConnsPerHost: 8,
-	}}
+	}, configuration.Database}
 	if configuration != expected {
 		t.Fatalf("got %+v, want %+v", configuration, expected)
 	}
