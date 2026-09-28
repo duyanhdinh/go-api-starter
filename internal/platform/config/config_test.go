@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +33,8 @@ func TestProfiles(t *testing.T) {
 				expectedLevel = slog.LevelInfo
 			}
 			databaseDefaults, _ := LoadDatabase(func(string) string { return "" })
-			expected := Config{expectedEnvironment, expectedLevel, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second, defaultHTTPClientConfig(), databaseDefaults}
-			if configuration != expected {
+			expected := Config{expectedEnvironment, expectedLevel, expectedAddress, 5 * time.Second, 15 * time.Second, 15 * time.Second, 60 * time.Second, 10 * time.Second, defaultHTTPClientConfig(), databaseDefaults, CORSConfig{}}
+			if !reflect.DeepEqual(configuration, expected) {
 				t.Fatalf("got %+v, want %+v", configuration, expected)
 			}
 		})
@@ -63,8 +64,8 @@ func TestEnvironmentOverrides(t *testing.T) {
 		Timeout: 12 * time.Second, ConnectTimeout: 750 * time.Millisecond,
 		TLSHandshakeTimeout: 2 * time.Second, ResponseHeaderTimeout: 3 * time.Second,
 		IdleConnTimeout: 45 * time.Second, MaxIdleConns: 20, MaxIdleConnsPerHost: 4, MaxConnsPerHost: 8,
-	}, configuration.Database}
-	if configuration != expected {
+	}, configuration.Database, CORSConfig{}}
+	if !reflect.DeepEqual(configuration, expected) {
 		t.Fatalf("got %+v, want %+v", configuration, expected)
 	}
 }

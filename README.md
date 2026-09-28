@@ -1,5 +1,61 @@
 # Med Quiz Server
 
+## CORS tùy chọn
+
+CORS mặc định tắt, giữ nguyên routing (kể cả `OPTIONS /health` trả 405).
+Cấu hình dùng env override profile JSON; giá trị env trống dùng mặc định profile.
+Danh sách phân cách bằng dấu phẩy, bỏ khoảng trắng quanh từng phần tử.
+
+| Biến | Mặc định | Quy tắc khi bật |
+| --- | --- | --- |
+| `CORS_ENABLED` | `false` | boolean |
+| `CORS_ALLOWED_ORIGINS` | trống | bắt buộc origin HTTP/HTTPS cụ thể, ví dụ `http://localhost:3000,https://example.com` |
+| `CORS_ALLOWED_METHODS` | `GET,HEAD` | danh sách HTTP method, phân biệt hoa/thường |
+| `CORS_ALLOWED_HEADERS` | trống | header request được phép trong preflight, so sánh không phân biệt hoa/thường |
+| `CORS_EXPOSED_HEADERS` | trống | header response cho JavaScript đọc thêm |
+| `CORS_ALLOW_CREDENTIALS` | `false` | bật có chủ đích cho origin tin cậy |
+| `CORS_MAX_AGE` | `10m` | duration không âm, nguyên giây; `0s` để không cache preflight |
+
+Origin không có path (kể cả `/` cuối), query, fragment hay userinfo. Không hỗ trợ
+wildcard, regex hoặc `null`; port nếu có phải từ 1 đến 65535. Danh sách method/header
+không hỗ trợ wildcard. Khi bật, cấu hình sai làm startup thất bại với tên biến lỗi.
+Khi tắt, các thiết lập CORS phụ được bỏ qua. Origin request phải khớp chính xác allowlist.
+
+Ví dụ chạy local trong PowerShell:
+
+```powershell
+$env:CORS_ENABLED = 'true'
+$env:CORS_ALLOWED_ORIGINS = 'http://localhost:3000'
+$env:CORS_ALLOWED_HEADERS = 'Authorization,Content-Type'
+go run ./cmd/api
+```
+
+Để dùng cookie/credentials, chủ động đặt `CORS_ALLOW_CREDENTIALS=true` và phía trình
+duyệt dùng `fetch(url, { credentials: 'include' })`; chính sách cookie vẫn áp dụng.
+CORS không thay authentication, authorization hay bảo vệ CSRF và không chặn client
+ngoài trình duyệt. Actual request từ origin bị từ chối vẫn đi qua HTTP bình thường,
+nhưng không nhận header cấp quyền CORS. Response lỗi từ origin được phép cũng có CORS.
+
+Preflight là OPTIONS có cả Origin và Access-Control-Request-Method: hợp lệ trả 204
+không body, origin/method/header bị từ chối trả 403 không cấp quyền CORS. OPTIONS khác
+vẫn theo routing. Middleware CORS bao ngoài recovery; nếu thêm limiter sau này, đặt
+limiter bên trong CORS để preflight được xử lý trước. Vary phân biệt origin và các
+thuộc tính preflight, đồng thời giữ giá trị Vary hiện có.
+
+Smoke HTTP sau khi bật, từ terminal khác:
+
+```powershell
+curl.exe -i http://localhost:8080/health -H "Origin: http://localhost:3000"
+curl.exe -i -X OPTIONS http://localhost:8080/health -H "Origin: http://localhost:3000" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: Authorization"
+```
+
+Kỳ vọng 200 với body health và allow-origin cụ thể; preflight 204 không body. Sau khi
+đặt `CORS_ENABLED=false` và khởi động lại, chạy lại: GET vẫn 200, OPTIONS trở lại 405,
+không có header cấp quyền CORS. Với Compose, sửa `.env` rồi tạo lại service để nhận env
+mới. Mitigation: tắt CORS hoặc khôi phục cấu hình trước và kiểm tra `/health` lại.
+`go test ./cmd/api -run TestCORSSmoke -v` kiểm tra actual/preflight qua socket khi
+bật/tắt; kiểm tra này không thay thử cross-origin bằng trình duyệt thật.
+
 Khung dự án Go theo `architect.txt`, được tạo trực tiếp tại thư mục `server`.
 
 ```text

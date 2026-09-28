@@ -25,6 +25,7 @@ type Config struct {
 	ShutdownTimeout   time.Duration
 	HTTPClient        HTTPClientConfig
 	Database          DatabaseConfig
+	CORS              CORSConfig
 }
 
 func Load() (Config, error) {
@@ -104,6 +105,10 @@ func load(getenv func(string) string) (Config, error) {
 		*setting.target = count
 	}
 	if err := configuration.HTTPClient.Validate(); err != nil {
+		return Config{}, err
+	}
+	configuration.CORS, err = loadCORS(value)
+	if err != nil {
 		return Config{}, err
 	}
 	configuration.Database, err = LoadDatabase(getenv)
