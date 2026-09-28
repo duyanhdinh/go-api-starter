@@ -1,6 +1,6 @@
 services:
   api:
-    image: med-quiz-server:${IMAGE_TAG:-local}
+    image: go-api-starter:${IMAGE_TAG:-local}
     build:
       context: .
     environment:
