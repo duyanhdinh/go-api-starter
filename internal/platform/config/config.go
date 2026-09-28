@@ -26,6 +26,7 @@ type Config struct {
 	HTTPClient        HTTPClientConfig
 	Database          DatabaseConfig
 	CORS              CORSConfig
+	RateLimit         RateLimitConfig
 }
 
 func Load() (Config, error) {
@@ -108,6 +109,10 @@ func load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	configuration.CORS, err = loadCORS(value)
+	if err != nil {
+		return Config{}, err
+	}
+	configuration.RateLimit, err = loadRateLimit(value)
 	if err != nil {
 		return Config{}, err
 	}

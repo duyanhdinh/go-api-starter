@@ -41,7 +41,7 @@ func run(configuration config.Config, applicationLogger *slog.Logger) error {
 	}()
 	server := &http.Server{
 		Addr:              configuration.HTTPAddr,
-		Handler:           withCORS(newHandler(applicationLogger, pool.Ping), configuration.CORS),
+		Handler:           withCORS(withRateLimit(newHandler(applicationLogger, pool.Ping), configuration.RateLimit, applicationLogger), configuration.CORS),
 		ReadHeaderTimeout: configuration.ReadHeaderTimeout,
 		ReadTimeout:       configuration.ReadTimeout,
 		WriteTimeout:      configuration.WriteTimeout,

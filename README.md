@@ -1,5 +1,43 @@
 # Med Quiz Server
 
+## Rate limit tùy chọn
+
+Limiter mặc định tắt để giữ nguyên hành vi hiện tại. Khi bật, API áp dụng token
+bucket trong RAM theo IP nguồn của `RemoteAddr`; mỗi request thành công tiêu thụ
+một token. Mặc định mỗi IP nhận 10 request/giây với burst 20 request. Cấu hình
+có hiệu lực trên một process, reset khi restart và không đồng bộ giữa các instance.
+
+| Biến | Mặc định | Quy tắc khi bật |
+| --- | --- | --- |
+| `RATE_LIMIT_ENABLED` | `false` | boolean |
+| `RATE_LIMIT_REQUESTS_PER_SECOND` | `10` | tốc độ refill, request/giây, số dương |
+| `RATE_LIMIT_BURST` | `20` | dung lượng token bucket, số nguyên dương |
+| `RATE_LIMIT_MAX_CLIENTS` | `10000` | số IP tối đa được theo dõi, số nguyên dương |
+| `RATE_LIMIT_ENTRY_TTL` | `10m` | xóa bucket không hoạt động sau duration dương |
+
+Khi bảng đầy, request từ IP đã có entry vẫn được tính bình thường; IP mới nhận
+429 đến khi entry hết TTL được dọn. Dọn entry diễn ra khi có request, không tạo
+goroutine nền. Khóa IP chuẩn hóa từ `RemoteAddr`, bỏ port; `X-Forwarded-For` và
+`X-Real-IP` không được tin cậy. Sau reverse proxy, nhiều người có thể dùng chung
+bucket theo IP proxy. Chỉ bật ngoài thực tế sau khi xác định cách xử lý proxy;
+trusted proxy hoặc hạn mức phân tán nằm ngoài phạm vi hiện tại. Đây không phải
+quota theo tài khoản hay biện pháp chống DDoS đầy đủ.
+
+Giới hạn chính xác `GET`/`HEAD /health` và `/ready` được miễn nếu route tồn tại;
+limiter không tạo route readiness. CORS preflight được xử lý trước limiter và
+response 429 từ origin được phép vẫn có CORS headers. Khi vượt giới hạn, API trả
+JSON `rate_limited` cùng `Retry-After`; HEAD không có body. Để bật local:
+
+```powershell
+$env:RATE_LIMIT_ENABLED = 'true'
+go run ./cmd/api
+```
+
+Với Compose, đặt `RATE_LIMIT_ENABLED=true` trong `.env` rồi tạo lại service API.
+Mitigation: đặt lại `RATE_LIMIT_ENABLED=false` và khởi động lại/tạo lại service.
+Kiểm tra an toàn bằng burst cục bộ và gọi `/health`; không chạy load test lên
+dịch vụ thật.
+
 ## CORS tùy chọn
 
 CORS mặc định tắt, giữ nguyên routing (kể cả `OPTIONS /health` trả 405).
@@ -38,8 +76,8 @@ nhưng không nhận header cấp quyền CORS. Response lỗi từ origin đư�
 
 Preflight là OPTIONS có cả Origin và Access-Control-Request-Method: hợp lệ trả 204
 không body, origin/method/header bị từ chối trả 403 không cấp quyền CORS. OPTIONS khác
-vẫn theo routing. Middleware CORS bao ngoài recovery; nếu thêm limiter sau này, đặt
-limiter bên trong CORS để preflight được xử lý trước. Vary phân biệt origin và các
+vẫn theo routing. Middleware CORS bao ngoài limiter và recovery để preflight được
+xử lý trước, đồng thời giữ CORS headers trên response lỗi. Vary phân biệt origin và các
 thuộc tính preflight, đồng thời giữ giá trị Vary hiện có.
 
 Smoke HTTP sau khi bật, từ terminal khác:
