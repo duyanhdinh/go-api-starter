@@ -3,6 +3,9 @@ services:
     image: go-api-starter:${IMAGE_TAG:-local}
     build:
       context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-dev}
       DOCS_ENABLED: ${DOCS_ENABLED:-}
@@ -47,7 +50,6 @@ services:
     stop_grace_period: ${STOP_GRACE_PERIOD:-30s}
   postgres:
     image: postgres:17
-    profiles: [database]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
