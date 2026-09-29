@@ -15,19 +15,20 @@ import (
 var profiles embed.FS
 
 type Config struct {
-	Environment       string
-	LogLevel          slog.Level
-	HTTPAddr          string
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	HTTPClient        HTTPClientConfig
-	Database          DatabaseConfig
-	CORS              CORSConfig
-	RateLimit         RateLimitConfig
-	DocsEnabled       bool
+	Environment        string
+	LogLevel           slog.Level
+	HTTPAddr           string
+	ReadHeaderTimeout  time.Duration
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
+	ShutdownTimeout    time.Duration
+	UserRequestTimeout time.Duration
+	HTTPClient         HTTPClientConfig
+	Database           DatabaseConfig
+	CORS               CORSConfig
+	RateLimit          RateLimitConfig
+	DocsEnabled        bool
 }
 
 func Load() (Config, error) {
@@ -80,6 +81,7 @@ func load(getenv func(string) string) (Config, error) {
 		{"HTTP_WRITE_TIMEOUT", &configuration.WriteTimeout},
 		{"HTTP_IDLE_TIMEOUT", &configuration.IdleTimeout},
 		{"HTTP_SHUTDOWN_TIMEOUT", &configuration.ShutdownTimeout},
+		{"USER_REQUEST_TIMEOUT", &configuration.UserRequestTimeout},
 		{"HTTP_CLIENT_TIMEOUT", &configuration.HTTPClient.Timeout},
 		{"HTTP_CLIENT_CONNECT_TIMEOUT", &configuration.HTTPClient.ConnectTimeout},
 		{"HTTP_CLIENT_TLS_HANDSHAKE_TIMEOUT", &configuration.HTTPClient.TLSHandshakeTimeout},

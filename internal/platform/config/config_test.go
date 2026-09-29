@@ -34,6 +34,7 @@ func TestProfiles(t *testing.T) {
 			}
 			databaseDefaults, _ := LoadDatabase(func(string) string { return "" })
 			expected := Config{Environment: expectedEnvironment, LogLevel: expectedLevel, HTTPAddr: expectedAddress, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, ShutdownTimeout: 10 * time.Second, HTTPClient: defaultHTTPClientConfig(), Database: databaseDefaults, DocsEnabled: environment == "" || environment == "dev"}
+			expected.UserRequestTimeout = 5 * time.Second
 			if !reflect.DeepEqual(configuration, expected) {
 				t.Fatalf("got %+v, want %+v", configuration, expected)
 			}
@@ -49,6 +50,7 @@ func TestEnvironmentOverrides(t *testing.T) {
 		"HTTP_READ_HEADER_TIMEOUT": "1s", "HTTP_READ_TIMEOUT": "2s",
 		"HTTP_WRITE_TIMEOUT": "3s", "HTTP_IDLE_TIMEOUT": "4s",
 		"HTTP_SHUTDOWN_TIMEOUT": "500ms",
+		"USER_REQUEST_TIMEOUT":  "750ms",
 		"HTTP_CLIENT_TIMEOUT":   "12s", "HTTP_CLIENT_CONNECT_TIMEOUT": "750ms",
 		"HTTP_CLIENT_TLS_HANDSHAKE_TIMEOUT": "2s", "HTTP_CLIENT_RESPONSE_HEADER_TIMEOUT": "3s",
 		"HTTP_CLIENT_IDLE_CONN_TIMEOUT": "45s", "HTTP_CLIENT_MAX_IDLE_CONNS": "20",
@@ -66,6 +68,7 @@ func TestEnvironmentOverrides(t *testing.T) {
 		TLSHandshakeTimeout: 2 * time.Second, ResponseHeaderTimeout: 3 * time.Second,
 		IdleConnTimeout: 45 * time.Second, MaxIdleConns: 20, MaxIdleConnsPerHost: 4, MaxConnsPerHost: 8,
 	}, Database: configuration.Database, DocsEnabled: true}
+	expected.UserRequestTimeout = 750 * time.Millisecond
 	if !reflect.DeepEqual(configuration, expected) {
 		t.Fatalf("got %+v, want %+v", configuration, expected)
 	}
@@ -80,6 +83,8 @@ func TestInvalidConfiguration(t *testing.T) {
 		{"HTTP_READ_HEADER_TIMEOUT", "bad"}, {"HTTP_READ_TIMEOUT", "0s"},
 		{"HTTP_WRITE_TIMEOUT", "-1s"}, {"HTTP_IDLE_TIMEOUT", "60"},
 		{"HTTP_SHUTDOWN_TIMEOUT", "999999999999999999h"},
+		{"USER_REQUEST_TIMEOUT", "bad"}, {"USER_REQUEST_TIMEOUT", "0s"},
+		{"USER_REQUEST_TIMEOUT", "-1s"}, {"USER_REQUEST_TIMEOUT", "999999999999999999h"},
 	} {
 		t.Run(testCase.name+"="+testCase.value, func(t *testing.T) {
 			_, err := load(func(name string) string {

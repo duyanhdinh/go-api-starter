@@ -1,5 +1,12 @@
 # Go API Starter
 
+## Luồng mẫu CRUD user
+
+Module `internal/user` cung cấp create/read/list/update/delete với ba trường
+`id`, `email`, `name`, lưu PostgreSQL. Route `/api/v1/users` bật ở mọi môi trường khi
+DB bật; chưa có authentication/authorization. Hướng dẫn từng bước dựng module,
+migration, gọi API và test nằm ở [required/explain](required/explain/README.md).
+
 ## Rate limit tùy chọn
 
 Limiter mặc định tắt để giữ nguyên hành vi hiện tại. Khi bật, API áp dụng token
@@ -140,10 +147,15 @@ server/
 - `repository.go`: truy cập dữ liệu.
 - `order.go`, `product.go`: định nghĩa model của từng module.
 - `internal/platform`: cấu hình, kết nối dữ liệu và logging dùng nội bộ.
+- `internal/platform/http/middleware`: deadline cho request, phục hồi panic, CORS và rate limit theo client. `cmd/api` ghép middleware và quyết định miễn rate limit cho health/readiness.
+- `internal/platform/http/request`: giải mã JSON nghiêm ngặt với giới hạn body do endpoint truyền vào; validation nghiệp vụ vẫn ở module.
+- `internal/platform/http/response`: dùng chung JSON headers, xử lý HEAD, cấu trúc lỗi và log lỗi ghi response. `JSON` giữ newline cuối body; `RawJSON` và `Error` giữ response gọn như API hiện tại.
+
+`request.ReadJSON[Input](writer, request, logger, maxBytes, invalidMessage)` giải mã JSON và ghi lỗi 400/413/415; caller truyền kiểu input, giới hạn body và thông báo input không hợp lệ. `response.MethodNotAllowed(allowedMethods, writeError)` tạo handler 405 từ hàm chọn method và hàm ghi lỗi do caller truyền vào, giữ định dạng response của từng endpoint.
 - `pkg`: dành cho code dùng chung có thể được dự án khác import.
 
 API server có endpoint kiểm tra hoạt động `GET /health`, trả JSON
-`{"status":"ok"}` với HTTP 200. Worker và model nghiệp vụ
+`{"status":"ok"}` với HTTP 200. Module user có CRUD mẫu; worker, product và order
 chưa được triển khai. PostgreSQL là dependency tùy chọn. Các thư mục chưa có code
 dùng `.gitkeep` để có thể được lưu trong Git.
 
@@ -204,6 +216,7 @@ profile. Không tự động đọc file `.env`. `go test` không tự đặt `A
 | `HTTP_ADDR` | `:8080` | `127.0.0.1:0` | `:8080` |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` | `5s` |
 | `HTTP_READ_TIMEOUT` | `15s` | `15s` | `15s` |
+| `USER_REQUEST_TIMEOUT` | `5s` | `5s` | `5s` |
 | `HTTP_WRITE_TIMEOUT` | `15s` | `15s` | `15s` |
 | `HTTP_IDLE_TIMEOUT` | `60s` | `60s` | `60s` |
 | `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` | `10s` |
@@ -345,14 +358,16 @@ API trả lỗi JSON thống nhất, ví dụ:
 - Panic trong handler trước khi gửi response: HTTP 500, code `internal_error`.
 - `HEAD` trả status/header tương ứng và không có body.
 
-`cmd/api/handler.go` quản lý response và recovery bằng `net/http`. Panic được ghi qua
+`internal/platform/http/response` xử lý JSON response; `internal/platform/http/middleware/recover.go`
+xử lý phục hồi panic bằng `net/http`. Panic được ghi qua
 `slog`; không ghi giá trị panic, URL, header hoặc body request để tránh lộ dữ liệu.
 Nếu response đã bắt đầu gửi, recovery hủy request bằng `http.ErrAbortHandler`;
 không nối JSON lỗi vào response dở dang. Panic chủ động bằng `http.ErrAbortHandler`
 được giữ nguyên. Recovery chỉ áp dụng cho goroutine đang xử lý HTTP request.
 Lỗi ghi response được log, không thử ghi lại khi kết nối có thể đã đóng.
 Lỗi listen/serve/shutdown được bọc bằng `%w` để giữ nguyên nguyên nhân cho `errors.Is/As`.
-Các module nghiệp vụ và worker hiện còn trống, chưa có xử lý lỗi nghiệp vụ.
+Module user ánh xạ lỗi validation, không tìm thấy và email trùng sang HTTP;
+product, order và worker hiện còn trống.
 
 Kiểm tra bằng `go test ./...` và `go vet ./...`. Sau triển khai, kiểm tra `/health`
 trả 200 và `{"status":"ok"}`, route không tồn tại trả JSON 404, `POST /health` trả
@@ -571,7 +586,7 @@ Copy `.env.example` thành `.env`, tự cung cấp `POSTGRES_USER`,
 để khởi tạo volume mới; đổi env không đổi credential trong volume đã có.
 
 ```sh
-docker compose --profile database up -d --wait postgres
+docker compose up -d --wait postgres
 ```
 
 Đặt `DB_ENABLED=true` và `DATABASE_URL` trong `.env` theo mẫu
@@ -580,21 +595,23 @@ docker compose --profile database up -d --wait postgres
 host `127.0.0.1`, cổng `POSTGRES_PORT` (mặc định 5432).
 
 ```sh
-docker compose up -d --build api
+docker compose up -d --build
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
 
-Service postgres chỉ chạy khi bật profile hoặc gọi đích danh; API không có
-`depends_on` bắt buộc. Volume `postgres_data` giữ dữ liệu. Không dùng
-`docker compose down -v` trên dữ liệu cần giữ. Để quay về chạy không DB, đặt
-`DB_ENABLED=false` và tạo lại service API; dữ liệu PostgreSQL vẫn giữ nguyên.
+Cả hai service chạy bằng `docker compose up -d --build`; API dùng `depends_on`
+để chờ PostgreSQL vượt qua healthcheck. Bước chạy PostgreSQL riêng ở trên là tùy chọn.
+Volume `postgres_data` giữ dữ liệu. Không dùng `docker compose down -v` trên dữ liệu
+cần giữ. Để chạy API không DB, đặt `DB_ENABLED=false` và dùng
+`docker compose up -d --no-deps api`; container PostgreSQL đang chạy vẫn tiếp tục
+chạy và dữ liệu vẫn giữ nguyên.
 
 ### Lệnh migration riêng
 
 Chạy từ root repo. `create` không cần DB. Các lệnh DB dùng cùng env với API,
 bắt buộc `DB_ENABLED=true`. Mặc định đọc `migrations/postgres`; có thể đặt
-`MIGRATIONS_DIR` để thay đường dẫn. Chưa có migration nghiệp vụ.
+`MIGRATIONS_DIR` để thay đường dẫn. Migration `202609290001_create_users` tạo bảng user.
 
 ```sh
 go run ./cmd/migrate create add_example

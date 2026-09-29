@@ -9,9 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"server/api"
 	"server/internal/platform/config"
+	"server/internal/platform/http/middleware"
+	"server/internal/user"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -23,9 +26,12 @@ func TestAPIContractMatchesRoutesAndResponses(t *testing.T) {
 	document := loadAPIContract(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	router := newRouter(logger, false)
+	registerApplicationRoutes(router, applicationHandlers{
+		Users: user.NewHandler(nil, logger, 5*time.Second),
+	})
 	actualRoutes := map[string]bool{}
 	if err := chi.Walk(router, func(method, path string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		actualRoutes[method+" "+path] = true
+		actualRoutes[method+" "+strings.TrimSuffix(path, "/")] = true
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -33,6 +39,8 @@ func TestAPIContractMatchesRoutesAndResponses(t *testing.T) {
 	expectedRoutes := map[string]bool{
 		"GET /health": true, "HEAD /health": true,
 		"GET /ready": true, "HEAD /ready": true,
+		"GET /api/v1/users": true, "POST /api/v1/users": true,
+		"GET /api/v1/users/{id}": true, "PUT /api/v1/users/{id}": true, "DELETE /api/v1/users/{id}": true,
 	}
 	if !sameSet(actualRoutes, expectedRoutes) {
 		t.Fatalf("handler routes = %v, expected %v", actualRoutes, expectedRoutes)
@@ -142,7 +150,7 @@ func TestContractLoaderRejectsInvalidSpecAndMissingReference(t *testing.T) {
 func TestDocsRoutesAndDisabledRoutingSmoke(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	configuration := config.RateLimitConfig{}
-	withDocs := withCORS(withRateLimit(newHandlerWithDocs(logger, true), configuration, logger), config.CORSConfig{})
+	withDocs := middleware.CORS(withRateLimit(newHandlerWithDocs(logger, true), configuration, logger), config.CORSConfig{})
 	server := httptest.NewServer(withDocs)
 	defer server.Close()
 	client := server.Client()
@@ -220,7 +228,7 @@ func TestDocsRoutesAndDisabledRoutingSmoke(t *testing.T) {
 		}
 	}
 
-	withoutDocs := withCORS(withRateLimit(newHandlerWithDocs(logger, false), configuration, logger), config.CORSConfig{})
+	withoutDocs := middleware.CORS(withRateLimit(newHandlerWithDocs(logger, false), configuration, logger), config.CORSConfig{})
 	disabledServer := httptest.NewServer(withoutDocs)
 	defer disabledServer.Close()
 	disabledClient := disabledServer.Client()

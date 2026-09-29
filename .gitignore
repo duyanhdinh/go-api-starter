@@ -6,3 +6,7 @@ AGENTS.md
 *.env
 !.env.example
 required
+!/required/
+/required/*
+!/required/explain/
+design/

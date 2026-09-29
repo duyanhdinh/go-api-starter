@@ -3,7 +3,9 @@ info:
   title: Go API Starter
   version: 1.0.0
   description: |
-    This contract documents the implemented health and readiness routes only.
+    This contract documents health, readiness, and the sample user CRUD routes.
+    User routes are unauthenticated teaching examples, available when
+    DB_ENABLED is true in every environment. Otherwise they return 404.
     Unknown paths return HTTP 404 using the NotFound error envelope defined
     under components.responses. CORS is disabled by default. When enabled,
     allowed preflight requests return 204
@@ -16,6 +18,88 @@ servers:
   - url: /
     description: Same origin as this API server
 paths:
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: List users ordered by ID
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: User list; an empty list is an empty JSON array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/User'}
+        '400': {$ref: '#/components/responses/UserError'}
+        '404': {$ref: '#/components/responses/UserError'}
+        '429': {$ref: '#/components/responses/UserError'}
+        '500': {$ref: '#/components/responses/UserError'}
+    post:
+      operationId: createUser
+      summary: Create a user
+      requestBody: {$ref: '#/components/requestBodies/UserInput'}
+      responses:
+        '201':
+          description: User created.
+          headers:
+            Location:
+              schema: {type: string}
+              description: Path of the created user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        '400': {$ref: '#/components/responses/UserError'}
+        '404': {$ref: '#/components/responses/UserError'}
+        '409': {$ref: '#/components/responses/UserError'}
+        '413': {$ref: '#/components/responses/UserError'}
+        '415': {$ref: '#/components/responses/UserError'}
+        '429': {$ref: '#/components/responses/UserError'}
+        '500': {$ref: '#/components/responses/UserError'}
+  /api/v1/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: integer, format: int64, minimum: 1}
+    get:
+      operationId: getUser
+      summary: Read a user
+      responses:
+        '200': {$ref: '#/components/responses/User'}
+        '400': {$ref: '#/components/responses/UserError'}
+        '404': {$ref: '#/components/responses/UserError'}
+        '429': {$ref: '#/components/responses/UserError'}
+        '500': {$ref: '#/components/responses/UserError'}
+    put:
+      operationId: updateUser
+      summary: Replace both email and name of an existing user
+      requestBody: {$ref: '#/components/requestBodies/UserInput'}
+      responses:
+        '200': {$ref: '#/components/responses/User'}
+        '400': {$ref: '#/components/responses/UserError'}
+        '404': {$ref: '#/components/responses/UserError'}
+        '409': {$ref: '#/components/responses/UserError'}
+        '413': {$ref: '#/components/responses/UserError'}
+        '415': {$ref: '#/components/responses/UserError'}
+        '429': {$ref: '#/components/responses/UserError'}
+        '500': {$ref: '#/components/responses/UserError'}
+    delete:
+      operationId: deleteUser
+      summary: Permanently delete a user
+      responses:
+        '204':
+          description: User deleted; no response body.
+        '400': {$ref: '#/components/responses/UserError'}
+        '404': {$ref: '#/components/responses/UserError'}
+        '429': {$ref: '#/components/responses/UserError'}
+        '500': {$ref: '#/components/responses/UserError'}
   /health:
     get:
       operationId: getHealth
@@ -133,6 +217,13 @@ paths:
             X-Content-Type-Options:
               $ref: '#/components/headers/ContentTypeOptions'
 components:
+  requestBodies:
+    UserInput:
+      required: true
+      description: Both fields are required. Body limit is 4096 bytes. Email is trimmed and lowercased; name is trimmed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/UserInput'}
   headers:
     JSONContentType:
       description: The response media type.
@@ -150,6 +241,25 @@ components:
         type: string
         const: nosniff
   schemas:
+    User:
+      type: object
+      required: [id, email, name]
+      additionalProperties: false
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        email: {type: string, maxLength: 254}
+        name: {type: string, minLength: 1, maxLength: 100}
+    UserInput:
+      type: object
+      required: [email, name]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          description: A single bare email address, at most 254 bytes after trimming; must be unique ignoring case.
+        name:
+          type: string
+          description: Nonempty and at most 100 Unicode characters after trimming.
     HealthStatus:
       type: object
       required: [status]
@@ -176,12 +286,22 @@ components:
           properties:
             code:
               type: string
-              enum: [not_found, method_not_allowed, internal_error]
+              enum: [not_found, method_not_allowed, internal_error, invalid_input, email_taken, body_too_large, unsupported_media_type, rate_limited]
             message:
               type: string
           additionalProperties: false
       additionalProperties: false
   responses:
+    User:
+      description: A user with exactly id, email and name.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/User'}
+    UserError:
+      description: Invalid input (400), unavailable route or missing user (404), duplicate email (409), body too large (413), unsupported media type (415), rate limit (429), or internal failure (500).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
     NotFound:
       description: The request path does not match a registered route.
       content:

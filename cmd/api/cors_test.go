@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"server/internal/platform/config"
+	"server/internal/platform/http/middleware"
 )
 
 func testCORSConfig() config.CORSConfig {
@@ -23,7 +24,7 @@ func TestCORSSmoke(t *testing.T) {
 		for _, credentials := range []bool{false, true} {
 			configuration := testCORSConfig()
 			configuration.Enabled, configuration.AllowCredentials = enabled, credentials
-			server := httptest.NewServer(withCORS(newHandler(slog.New(slog.NewTextHandler(io.Discard, nil))), configuration))
+			server := httptest.NewServer(middleware.CORS(newHandler(slog.New(slog.NewTextHandler(io.Discard, nil))), configuration))
 			for _, testCase := range []struct {
 				method, path, origin, requestedMethod, headers string
 				status                                         int
@@ -124,7 +125,7 @@ func TestCORSRecoveryAndVary(t *testing.T) {
 	for _, method := range []string{"GET", "HEAD"} {
 		for _, action := range []string{"normal", "panic", "committed", "flush"} {
 			t.Run(method+action, func(t *testing.T) {
-				handler := withCORS(recoverPanics(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				handler := middleware.CORS(middleware.Recover(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 					writer.Header().Set("Vary", "Accept-Encoding, origin")
 					if action == "panic" {
 						writer.Header().Set("Set-Cookie", "secret")
@@ -177,7 +178,7 @@ func TestCORSRecoveryAndVary(t *testing.T) {
 
 func TestCORSPreflightStopsBeforeNext(t *testing.T) {
 	for _, denied := range []bool{false, true} {
-		handler := withCORS(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		handler := middleware.CORS(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Fatal("preflight reached downstream handler")
 		}), testCORSConfig())
 		request := httptest.NewRequest("OPTIONS", "/health", nil)
@@ -216,7 +217,7 @@ func TestChiRouterMiddlewareHTTPSmoke(t *testing.T) {
 		readinessChecks++
 		return errors.New("secret database error")
 	})
-	server := httptest.NewServer(withCORS(withRateLimit(handler, configuration, logger), testCORSConfig()))
+	server := httptest.NewServer(middleware.CORS(withRateLimit(handler, configuration, logger), testCORSConfig()))
 	defer server.Close()
 
 	requestAndCheck := func(method, path, requestedMethod string, wantStatus int, wantBody string, wantAllow bool) {
@@ -271,7 +272,7 @@ func TestReadinessRecoveryHTTPSmoke(t *testing.T) {
 			}
 			return nil
 		})
-		server := httptest.NewServer(withCORS(withRateLimit(handler, testRateLimitConfig(), logger), testCORSConfig()))
+		server := httptest.NewServer(middleware.CORS(withRateLimit(handler, testRateLimitConfig(), logger), testCORSConfig()))
 		t.Cleanup(server.Close)
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			request, err := http.NewRequest(method, server.URL+"/ready", nil)

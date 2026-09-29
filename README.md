@@ -1,5 +1,13 @@
 # Go API Starter
 
+## User CRUD teaching example
+
+`internal/user` implements PostgreSQL-backed create/read/list/update/delete with
+only `id`, `email`, and `name`. The `/api/v1/users` routes are available in every
+environment with the database enabled; authentication/authorization is not implemented. See the
+[step-by-step Vietnamese walkthrough](required/explain/README.md) for module
+boundaries, migrations, requests, tests, and rollback limitations.
+
 ## Optional rate limiting
 
 Rate limiting is disabled by default to preserve current behavior. When enabled, the API applies an in-memory token bucket keyed by the source IP from `RemoteAddr`; each successful request consumes one token. By default, each IP receives 10 requests per second with a burst of 20. Configuration applies to one process, resets on restart, and is not synchronized across instances.
@@ -107,9 +115,16 @@ server/
 - `repository.go`: accesses data.
 - `order.go`, `product.go`: define each module's model.
 - `internal/platform`: internal configuration, database connections, and logging.
+- `internal/platform/http/middleware`: request deadlines, panic recovery, CORS, and per-client rate limiting. `cmd/api` composes middleware and owns health/readiness rate-limit exemptions.
+- `internal/platform/http/request`: strict JSON decoding with a body-size limit supplied by each endpoint; domain validation remains in the module.
+- `internal/platform/http/response`: shared JSON headers, HEAD handling, error envelopes, and write-failure logging. `JSON` retains a trailing newline; `RawJSON` and `Error` preserve compact API responses.
 - `pkg`: code intended for reuse and import by other projects.
 
-The API server provides a `GET /health` health endpoint, returning JSON `{"status":"ok"}` with HTTP 200. The worker and business models have not been implemented. PostgreSQL is an optional dependency. Directories without code use `.gitkeep` so they can be tracked by Git.
+The timeout middleware sets a context deadline; it does not automatically return an HTTP timeout response. Keep endpoint-specific error mapping in the module handler.
+
+`request.ReadJSON[Input](writer, request, logger, maxBytes, invalidMessage)` decodes JSON and writes 400/413/415 errors; callers provide the input type, body limit, and invalid-input message. `response.MethodNotAllowed(allowedMethods, writeError)` builds a 405 handler from the caller's method-selection and error-writing functions, preserving each endpoint's response format.
+
+The API server provides a `GET /health` health endpoint, returning JSON `{"status":"ok"}` with HTTP 200. User CRUD is implemented as a teaching example; the worker, product, and order remain placeholders. PostgreSQL is an optional dependency. Directories without code use `.gitkeep` so they can be tracked by Git.
 
 ## Run the API server
 
@@ -155,6 +170,7 @@ Swagger UI asset source: npm package `swagger-ui-dist@5.32.15` (Apache-2.0); its
 | `HTTP_ADDR` | `:8080` | `127.0.0.1:0` | `:8080` |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | `5s` | `5s` |
 | `HTTP_READ_TIMEOUT` | `15s` | `15s` | `15s` |
+| `USER_REQUEST_TIMEOUT` | `5s` | `5s` | `5s` |
 | `HTTP_WRITE_TIMEOUT` | `15s` | `15s` | `15s` |
 | `HTTP_IDLE_TIMEOUT` | `60s` | `60s` | `60s` |
 | `HTTP_SHUTDOWN_TIMEOUT` | `10s` | `10s` | `10s` |
@@ -257,7 +273,7 @@ The API returns consistent JSON errors, for example:
 - Panic in a handler before a response is sent: HTTP 500, code `internal_error`.
 - `HEAD` returns the corresponding status/headers with no body.
 
-`cmd/api/handler.go` manages responses and recovery with `net/http`. Panics are logged through `slog`; panic values, URLs, headers, and request bodies are not logged to avoid exposing data. If a response has already started, recovery aborts the request with `http.ErrAbortHandler`; it does not append a JSON error to a partial response. An intentional panic with `http.ErrAbortHandler` is preserved. Recovery applies only to the goroutine handling the HTTP request. Response write errors are logged; the handler does not retry writing when the connection may already be closed. Listen/serve/shutdown errors are wrapped with `%w` to preserve the cause for `errors.Is/As`. Business modules and the worker are currently empty and have no business error handling.
+`internal/platform/http/response` handles JSON responses; `internal/platform/http/middleware/recover.go` handles panic recovery with `net/http`. Panics are logged through `slog`; panic values, URLs, headers, and request bodies are not logged to avoid exposing data. If a response has already started, recovery aborts the request with `http.ErrAbortHandler`; it does not append a JSON error to a partial response. An intentional panic with `http.ErrAbortHandler` is preserved. Recovery applies only to the goroutine handling the HTTP request. Response write errors are logged; the handler does not retry writing when the connection may already be closed. Listen/serve/shutdown errors are wrapped with `%w` to preserve the cause for `errors.Is/As`. User CRUD maps validation, not-found, and duplicate-email errors to HTTP; product, order, and the worker remain placeholders.
 
 Check with `go test ./...` and `go vet ./...`. After deployment, check that `/health` returns 200 and `{"status":"ok"}`, an unknown route returns JSON 404, and `POST /health` returns JSON 405. If a check fails, restore the previous binary/image and configuration, then check again.
 
@@ -396,22 +412,22 @@ The module uses `database/sql`, [pgx](https://github.com/jackc/pgx) v5.11.0, and
 Copy `.env.example` to `.env` and provide `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`. Do not leave the password empty. These values initialize a new volume; changing the environment does not change credentials in an existing volume.
 
 ```sh
-docker compose --profile database up -d --wait postgres
+docker compose up -d --wait postgres
 ```
 
 Set `DB_ENABLED=true` and `DATABASE_URL` in `.env` using the pattern `postgres://<user>:<password>@postgres:5432/<database>?sslmode=disable`. To run the API on the host, set the corresponding variables in the process environment and use host `127.0.0.1` with port `POSTGRES_PORT` (default 5432).
 
 ```sh
-docker compose up -d --build api
+docker compose up -d --build
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
 
-The postgres service runs only when its profile is enabled or it is targeted explicitly; the API has no required `depends_on`. The `postgres_data` volume preserves data. Do not run `docker compose down -v` when the data must be kept. To run without DB again, set `DB_ENABLED=false` and recreate the API service; PostgreSQL data remains intact.
+Both services start with `docker compose up -d --build`; the API waits for PostgreSQL to pass its healthcheck through `depends_on`. Starting PostgreSQL separately above is optional. The `postgres_data` volume preserves data. Do not run `docker compose down -v` when the data must be kept. To run the API without DB, set `DB_ENABLED=false` and use `docker compose up -d --no-deps api`; an already running PostgreSQL container remains running and its data remains intact.
 
 ### Standalone migration commands
 
-Run from the repository root. `create` does not require a DB. DB commands use the same environment as the API and require `DB_ENABLED=true`. The default migrations directory is `migrations/postgres`; set `MIGRATIONS_DIR` to use another path. No business migrations exist yet.
+Run from the repository root. `create` does not require a DB. DB commands use the same environment as the API and require `DB_ENABLED=true`. The default migrations directory is `migrations/postgres`; set `MIGRATIONS_DIR` to use another path. Migration `202609290001_create_users` creates the users table.
 
 ```sh
 go run ./cmd/migrate create add_example

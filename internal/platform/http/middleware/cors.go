@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"net/http"
@@ -10,7 +10,7 @@ import (
 	"server/internal/platform/config"
 )
 
-func withCORS(next http.Handler, configuration config.CORSConfig) http.Handler {
+func CORS(next http.Handler, configuration config.CORSConfig) http.Handler {
 	if !configuration.Enabled {
 		return next
 	}
